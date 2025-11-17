@@ -1,0 +1,1109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Billing Tracker</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // API Configuration - automatically uses the same origin
+        const API_URL = window.location.origin + '/api';
+
+        // Icons
+        const ChevronLeft = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"></polyline></svg>;
+        const ChevronRight = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 18 15 12 9 6"></polyline></svg>;
+        const Settings = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"></circle><path d="M12 1v6m0 6v6m0-18a9 9 0 019 9m-9-9a9 9 0 00-9 9m9 9a9 9 0 01-9-9m9 9a9 9 0 009-9"></path></svg>;
+        const Edit2 = ({ size = 18 }) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 3a2.828 2.828 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>;
+        const Save = ({ size = 18 }) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>;
+        const X = ({ size = 20 }) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>;
+        const Plus = ({ size = 20 }) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>;
+        const Trash = ({ size = 18 }) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"></path></svg>;
+
+        const BillingTracker = () => {
+            const [facilityGroups, setFacilityGroups] = useState([]);
+            const [billingRecords, setBillingRecords] = useState({});
+            const [selectedGroup, setSelectedGroup] = useState(null);
+            const [currentCycle, setCurrentCycle] = useState(0);
+            const [showSettings, setShowSettings] = useState(false);
+            const [editingRecord, setEditingRecord] = useState(null);
+            const [monthEndUrl, setMonthEndUrl] = useState('');
+            const [activeTab, setActiveTab] = useState('billing');
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
+
+            const MAX_PAST_CYCLES = 12;
+            const MAX_FUTURE_CYCLES = 6;
+
+            // Load all data on mount
+            useEffect(() => {
+                loadAllData();
+            }, []);
+
+            const loadAllData = async () => {
+                try {
+                    setLoading(true);
+                    setError(null);
+
+                    // Load facility groups (includes facilities and custom dates)
+                    const groupsRes = await fetch(`${API_URL}/facility-groups`);
+                    if (!groupsRes.ok) throw new Error('Failed to load facility groups');
+                    const groups = await groupsRes.json();
+                    
+                    setFacilityGroups(groups);
+                    if (groups.length > 0 && !selectedGroup) {
+                        setSelectedGroup(groups[0].id);
+                    }
+
+                    // Load billing records
+                    const recordsRes = await fetch(`${API_URL}/billing-records`);
+                    if (!recordsRes.ok) throw new Error('Failed to load billing records');
+                    const records = await recordsRes.json();
+                    setBillingRecords(records);
+
+                    // Load settings
+                    const settingsRes = await fetch(`${API_URL}/settings`);
+                    if (!settingsRes.ok) throw new Error('Failed to load settings');
+                    const settings = await settingsRes.json();
+                    setMonthEndUrl(settings.monthEndUrl || '');
+
+                    setLoading(false);
+                } catch (err) {
+                    console.error('Error loading data:', err);
+                    setError(err.message);
+                    setLoading(false);
+                }
+            };
+
+            // Save billing record to API
+            const handleSaveRecord = async (key, updates) => {
+                const updatedRecord = { ...billingRecords[key], ...updates };
+                
+                // Update local state immediately
+                setBillingRecords(prev => ({
+                    ...prev,
+                    [key]: updatedRecord
+                }));
+                setEditingRecord(null);
+
+                // Save to API
+                try {
+                    const response = await fetch(`${API_URL}/billing-records`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(updatedRecord)
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error('Failed to save record');
+                    }
+                } catch (err) {
+                    console.error('Error saving record:', err);
+                    alert('Failed to save record. Please try again.');
+                }
+            };
+
+            // Same date generation logic as before
+            const generateBillingDates = (billingType, billingDay, customDates, cycleOffset = 0) => {
+                const today = new Date();
+                let billingDate, fromDate, throughDate;
+
+                if (billingType === 'custom' && customDates && customDates.length > 0) {
+                    const sortedDates = [...customDates].sort((a, b) => new Date(b.date) - new Date(a.date));
+                    const targetDateObj = sortedDates[cycleOffset >= 0 ? cycleOffset : Math.abs(cycleOffset)];
+                    if (targetDateObj) {
+                        billingDate = new Date(targetDateObj.date);
+                        const frequency = targetDateObj.frequency || 'monthly';
+                        
+                        if (frequency === 'custom_range' && targetDateObj.customFrom && targetDateObj.customThrough) {
+                            fromDate = new Date(targetDateObj.customFrom);
+                            throughDate = new Date(targetDateObj.customThrough);
+                        } else {
+                            fromDate = new Date(billingDate);
+                            if (frequency === 'weekly') {
+                                fromDate.setDate(billingDate.getDate() - 7);
+                            } else if (frequency === 'biweekly') {
+                                fromDate.setDate(billingDate.getDate() - 14);
+                            } else if (frequency === 'bimonthly') {
+                                fromDate.setDate(billingDate.getDate() - 15);
+                            } else if (frequency === 'monthly') {
+                                fromDate.setMonth(billingDate.getMonth() - 1);
+                            }
+                            
+                            throughDate = new Date(billingDate);
+                            throughDate.setDate(billingDate.getDate() - 1);
+                        }
+                    } else {
+                        return { billingDate: '', fromDate: '', throughDate: '' };
+                    }
+                } else if (billingType === 'custom' && (!customDates || customDates.length === 0)) {
+                    return { billingDate: '', fromDate: '', throughDate: '' };
+                } else if (billingType === 'weekly') {
+                    const dayOfWeek = today.getDay();
+                    const daysToSubtract = (dayOfWeek - billingDay + 7) % 7;
+                    billingDate = new Date(today);
+                    billingDate.setDate(today.getDate() - daysToSubtract - (cycleOffset * 7));
+                    
+                    fromDate = new Date(billingDate);
+                    fromDate.setDate(billingDate.getDate() - 7);
+                    
+                    throughDate = new Date(billingDate);
+                    throughDate.setDate(billingDate.getDate() - 1);
+                } else if (billingType === 'biweekly') {
+                    const dayOfWeek = today.getDay();
+                    const daysToSubtract = (dayOfWeek - billingDay + 7) % 7;
+                    billingDate = new Date(today);
+                    billingDate.setDate(today.getDate() - daysToSubtract - (cycleOffset * 14));
+                    
+                    fromDate = new Date(billingDate);
+                    fromDate.setDate(billingDate.getDate() - 14);
+                    
+                    throughDate = new Date(billingDate);
+                    throughDate.setDate(billingDate.getDate() - 1);
+                } else if (billingType === 'bimonthly') {
+                    const currentDay = today.getDate();
+                    const currentMonth = today.getMonth();
+                    const currentYear = today.getFullYear();
+                    
+                    let billingDates = [];
+                    for (let i = 0; i < 24; i++) {
+                        const month = currentMonth - Math.floor(i / 2);
+                        const year = currentYear + Math.floor(month / 12);
+                        const adjustedMonth = ((month % 12) + 12) % 12;
+                        
+                        if (i % 2 === 0) {
+                            billingDates.push(new Date(year, adjustedMonth, 16));
+                        } else {
+                            billingDates.push(new Date(year, adjustedMonth, 1));
+                        }
+                    }
+                    
+                    billingDates.sort((a, b) => b - a);
+                    billingDate = billingDates[cycleOffset];
+                    
+                    fromDate = billingDates[cycleOffset + 1] || new Date(billingDate.getFullYear(), billingDate.getMonth() - 1, 16);
+                    
+                    throughDate = new Date(billingDate);
+                    throughDate.setDate(billingDate.getDate() - 1);
+                } else if (billingType === 'monthly') {
+                    billingDate = new Date(today.getFullYear(), today.getMonth() - cycleOffset, billingDay);
+                    
+                    fromDate = new Date(billingDate);
+                    fromDate.setMonth(billingDate.getMonth() - 1);
+                    
+                    throughDate = new Date(billingDate);
+                    throughDate.setDate(billingDate.getDate() - 1);
+                }
+
+                return {
+                    billingDate: formatDate(billingDate),
+                    fromDate: formatDate(fromDate),
+                    throughDate: formatDate(throughDate)
+                };
+            };
+
+            const formatDate = (date) => {
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const day = String(date.getDate()).padStart(2, '0');
+                const year = date.getFullYear();
+                return `${month}${day}${year}`;
+            };
+
+            const displayDate = (dateStr) => {
+                if (!dateStr || dateStr.length !== 8) return '';
+                return `${dateStr.slice(0,2)}/${dateStr.slice(2,4)}/${dateStr.slice(4)}`;
+            };
+
+            // Initialize billing records when group changes
+            useEffect(() => {
+                const selectedGroupData = facilityGroups.find(g => g.id === selectedGroup);
+                if (selectedGroupData) {
+                    initializeBillingRecords(selectedGroupData);
+                }
+            }, [selectedGroup, facilityGroups]);
+
+            const initializeBillingRecords = (group) => {
+                const records = {};
+                
+                const maxCyclesToCreate = group.billingType === 'custom' 
+                    ? Math.min(MAX_PAST_CYCLES, (group.customDates || []).length)
+                    : MAX_PAST_CYCLES;
+                
+                group.facilities.forEach(facility => {
+                    for (let cycle = 0; cycle <= maxCyclesToCreate; cycle++) {
+                        const dates = generateBillingDates(group.billingType, group.billingDay, group.customDates, cycle);
+                        const key = `${facility.id}-${cycle}`;
+                        
+                        if (dates.billingDate) {
+                            if (!billingRecords[key]) {
+                                records[key] = {
+                                    facilityId: facility.id,
+                                    facilityName: facility.name,
+                                    cycle: cycle,
+                                    ...dates,
+                                    paidAmount: '',
+                                    paidDate: ''
+                                };
+                            }
+                        }
+                    }
+                    
+                    if (group.billingType !== 'custom') {
+                        for (let cycle = -1; cycle >= -MAX_FUTURE_CYCLES; cycle--) {
+                            const dates = generateBillingDates(group.billingType, group.billingDay, group.customDates, cycle);
+                            const key = `${facility.id}-${cycle}`;
+                            if (!billingRecords[key]) {
+                                records[key] = {
+                                    facilityId: facility.id,
+                                    facilityName: facility.name,
+                                    cycle: cycle,
+                                    ...dates,
+                                    paidAmount: '',
+                                    paidDate: ''
+                                };
+                            }
+                        }
+                    }
+                });
+                
+                setBillingRecords(prev => ({ ...prev, ...records }));
+            };
+
+            const deleteGroup = async (groupId) => {
+                if (facilityGroups.length <= 1) {
+                    alert('Cannot delete the last group');
+                    return;
+                }
+                
+                if (!window.confirm('Are you sure you want to delete this group? This cannot be undone.')) {
+                    return;
+                }
+
+                try {
+                    const response = await fetch(`${API_URL}/facility-groups/${groupId}`, {
+                        method: 'DELETE'
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Failed to delete group');
+                    }
+
+                    // Remove from local state
+                    setFacilityGroups(prev => prev.filter(g => g.id !== groupId));
+                    
+                    if (selectedGroup === groupId) {
+                        const remainingGroups = facilityGroups.filter(g => g.id !== groupId);
+                        if (remainingGroups.length > 0) {
+                            setSelectedGroup(remainingGroups[0].id);
+                        }
+                    }
+                } catch (err) {
+                    console.error('Error deleting group:', err);
+                    alert('Failed to delete group. Please try again.');
+                }
+            };
+
+            // Settings Panel Component (abbreviated - key changes shown)
+            const SettingsPanel = () => {
+                const [newFacilityName, setNewFacilityName] = useState('');
+                const [addingToGroup, setAddingToGroup] = useState(null);
+                const [newCustomDate, setNewCustomDate] = useState('');
+                const [newCustomFrequency, setNewCustomFrequency] = useState('monthly');
+                const [newCustomFrom, setNewCustomFrom] = useState('');
+                const [newCustomThrough, setNewCustomThrough] = useState('');
+                const [expandedCustomDates, setExpandedCustomDates] = useState({});
+
+                const toggleCustomDates = (groupId) => {
+                    setExpandedCustomDates(prev => ({
+                        ...prev,
+                        [groupId]: !prev[groupId]
+                    }));
+                };
+
+                const addFacility = async (groupId) => {
+                    if (!newFacilityName.trim()) return;
+                    
+                    try {
+                        const response = await fetch(`${API_URL}/facilities`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                name: newFacilityName,
+                                groupId: groupId
+                            })
+                        });
+
+                        if (!response.ok) {
+                            throw new Error('Failed to add facility');
+                        }
+
+                        const result = await response.json();
+                        
+                        setFacilityGroups(prev => prev.map(g => {
+                            if (g.id === groupId) {
+                                return {
+                                    ...g,
+                                    facilities: [...g.facilities, { id: result.id, name: newFacilityName }]
+                                };
+                            }
+                            return g;
+                        }));
+                        
+                        setNewFacilityName('');
+                        setAddingToGroup(null);
+                    } catch (err) {
+                        console.error('Error adding facility:', err);
+                        alert('Failed to add facility. Please try again.');
+                    }
+                };
+
+                const removeFacility = async (groupId, facilityId) => {
+                    try {
+                        const response = await fetch(`${API_URL}/facilities/${facilityId}`, {
+                            method: 'DELETE'
+                        });
+
+                        if (!response.ok) {
+                            throw new Error('Failed to remove facility');
+                        }
+
+                        setFacilityGroups(prev => prev.map(g => {
+                            if (g.id === groupId) {
+                                return {
+                                    ...g,
+                                    facilities: g.facilities.filter(f => f.id !== facilityId)
+                                };
+                            }
+                            return g;
+                        }));
+                    } catch (err) {
+                        console.error('Error removing facility:', err);
+                        alert('Failed to remove facility. Please try again.');
+                    }
+                };
+
+                const saveGroupChanges = async (groupId, updates) => {
+                    try {
+                        const group = facilityGroups.find(g => g.id === groupId);
+                        const response = await fetch(`${API_URL}/facility-groups/${groupId}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                ...group,
+                                ...updates
+                            })
+                        });
+
+                        if (!response.ok) {
+                            throw new Error('Failed to update group');
+                        }
+
+                        setFacilityGroups(prev => prev.map(g => 
+                            g.id === groupId ? { ...g, ...updates } : g
+                        ));
+                    } catch (err) {
+                        console.error('Error updating group:', err);
+                        alert('Failed to update group. Please try again.');
+                    }
+                };
+
+                const addCustomDate = async (groupId) => {
+                    if (!newCustomDate) return;
+                    
+                    const newDateObj = { 
+                        date: newCustomDate, 
+                        frequency: newCustomFrequency 
+                    };
+                    
+                    if (newCustomFrequency === 'custom_range') {
+                        if (!newCustomFrom || !newCustomThrough) {
+                            alert('Please specify both From and Through dates for custom range');
+                            return;
+                        }
+                        newDateObj.customFrom = newCustomFrom;
+                        newDateObj.customThrough = newCustomThrough;
+                    }
+                    
+                    const group = facilityGroups.find(g => g.id === groupId);
+                    const updatedDates = [...(group.customDates || []), newDateObj].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+                    try {
+                        const response = await fetch(`${API_URL}/custom-dates`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                groupId: groupId,
+                                customDates: updatedDates
+                            })
+                        });
+
+                        if (!response.ok) {
+                            throw new Error('Failed to save custom dates');
+                        }
+
+                        setFacilityGroups(prev => prev.map(g => {
+                            if (g.id === groupId) {
+                                return { ...g, customDates: updatedDates };
+                            }
+                            return g;
+                        }));
+                        
+                        setNewCustomDate('');
+                        setNewCustomFrequency('monthly');
+                        setNewCustomFrom('');
+                        setNewCustomThrough('');
+                    } catch (err) {
+                        console.error('Error saving custom date:', err);
+                        alert('Failed to save custom date. Please try again.');
+                    }
+                };
+
+                const removeCustomDate = async (groupId, dateToRemove) => {
+                    const group = facilityGroups.find(g => g.id === groupId);
+                    const updatedDates = group.customDates.filter(d => d.date !== dateToRemove);
+
+                    try {
+                        const response = await fetch(`${API_URL}/custom-dates`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                groupId: groupId,
+                                customDates: updatedDates
+                            })
+                        });
+
+                        if (!response.ok) {
+                            throw new Error('Failed to update custom dates');
+                        }
+
+                        setFacilityGroups(prev => prev.map(g => {
+                            if (g.id === groupId) {
+                                return { ...g, customDates: updatedDates };
+                            }
+                            return g;
+                        }));
+                    } catch (err) {
+                        console.error('Error removing custom date:', err);
+                        alert('Failed to remove custom date. Please try again.');
+                    }
+                };
+
+                const saveMonthEndUrl = async () => {
+                    try {
+                        const response = await fetch(`${API_URL}/settings`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ monthEndUrl })
+                        });
+
+                        if (!response.ok) {
+                            throw new Error('Failed to save settings');
+                        }
+                    } catch (err) {
+                        console.error('Error saving settings:', err);
+                    }
+                };
+
+                const getFrequencyLabel = (freq) => {
+                    switch(freq) {
+                        case 'weekly': return 'Weekly (7 days)';
+                        case 'biweekly': return 'Bi-Weekly (14 days)';
+                        case 'bimonthly': return 'Bi-Monthly (15 days)';
+                        case 'monthly': return 'Monthly';
+                        case 'custom_range': return 'Custom Range';
+                        default: return freq;
+                    }
+                };
+
+                return (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                        <div className="bg-gray-100 rounded-lg p-6 max-w-5xl w-full max-h-[85vh] overflow-y-auto">
+                            <div className="flex justify-between items-center mb-6">
+                                <h2 className="text-2xl font-bold text-black">Settings</h2>
+                                <button onClick={() => { setShowSettings(false); saveMonthEndUrl(); }} className="p-2 hover:bg-gray-200 rounded">
+                                    <X />
+                                </button>
+                            </div>
+
+                            <div className="mb-6 bg-white border-2 border-gray-300 rounded-lg p-5">
+                                <h3 className="text-lg font-bold text-black mb-3">Month End Tracker</h3>
+                                <div className="flex items-center gap-2">
+                                    <span className="font-semibold text-black min-w-[100px]">URL:</span>
+                                    <input
+                                        type="text"
+                                        value={monthEndUrl}
+                                        onChange={(e) => setMonthEndUrl(e.target.value)}
+                                        placeholder="https://example.com/month-end"
+                                        className="border-2 border-gray-300 rounded px-3 py-2 flex-1 text-black font-medium"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="space-y-4">
+                                {facilityGroups.map(group => (
+                                    <div key={group.id} className="bg-white border-2 border-gray-300 rounded-lg p-5">
+                                        <div className="flex justify-between items-start mb-4">
+                                            <input
+                                                type="text"
+                                                defaultValue={group.name}
+                                                onBlur={(e) => saveGroupChanges(group.id, { name: e.target.value })}
+                                                className="text-lg font-bold text-black bg-transparent border-b-2 border-gray-300 focus:border-blue-500 outline-none px-1"
+                                            />
+                                            <button
+                                                onClick={() => deleteGroup(group.id)}
+                                                className="text-red-600 hover:text-red-800 p-2 hover:bg-red-50 rounded"
+                                                title="Delete Group"
+                                            >
+                                                <Trash size={20} />
+                                            </button>
+                                        </div>
+                                        
+                                        <div className="space-y-3 text-sm">
+                                            <div className="flex items-center gap-2">
+                                                <span className="font-semibold text-black min-w-[100px]">Billing Type:</span>
+                                                <select 
+                                                    value={group.billingType}
+                                                    onChange={(e) => saveGroupChanges(group.id, { billingType: e.target.value })}
+                                                    className="border-2 border-gray-300 rounded px-3 py-1 font-medium text-black"
+                                                >
+                                                    <option value="weekly">Weekly</option>
+                                                    <option value="biweekly">Bi-Weekly (Every 2 Weeks)</option>
+                                                    <option value="bimonthly">Bi-Monthly (1st & 16th)</option>
+                                                    <option value="monthly">Monthly</option>
+                                                    <option value="custom">Custom Schedule</option>
+                                                </select>
+                                            </div>
+                                            
+                                            {(group.billingType === 'weekly' || group.billingType === 'biweekly') && (
+                                                <div className="flex items-center gap-2">
+                                                    <span className="font-semibold text-black min-w-[100px]">Billing Day:</span>
+                                                    <select
+                                                        value={group.billingDay}
+                                                        onChange={(e) => saveGroupChanges(group.id, { billingDay: parseInt(e.target.value) })}
+                                                        className="border-2 border-gray-300 rounded px-3 py-1 font-medium text-black"
+                                                    >
+                                                        <option value="0">Sunday</option>
+                                                        <option value="1">Monday</option>
+                                                        <option value="2">Tuesday</option>
+                                                        <option value="3">Wednesday</option>
+                                                        <option value="4">Thursday</option>
+                                                        <option value="5">Friday</option>
+                                                        <option value="6">Saturday</option>
+                                                    </select>
+                                                </div>
+                                            )}
+
+                                            {group.billingType === 'monthly' && (
+                                                <div className="flex items-center gap-2">
+                                                    <span className="font-semibold text-black min-w-[100px]">Billing Date:</span>
+                                                    <input
+                                                        type="number"
+                                                        min="1"
+                                                        max="28"
+                                                        value={group.billingDay}
+                                                        onChange={(e) => saveGroupChanges(group.id, { billingDay: parseInt(e.target.value) })}
+                                                        className="border-2 border-gray-300 rounded px-3 py-1 w-20 font-medium text-black"
+                                                    />
+                                                </div>
+                                            )}
+
+                                            {group.billingType === 'custom' && (
+                                                <div>
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <span className="font-semibold text-black">Custom Billing Schedule:</span>
+                                                        <button
+                                                            onClick={() => toggleCustomDates(group.id)}
+                                                            className="text-blue-600 hover:text-blue-800 font-semibold text-sm flex items-center gap-1"
+                                                        >
+                                                            {expandedCustomDates[group.id] ? '▼ Collapse' : '▶ Expand'} 
+                                                            <span className="text-gray-600">({group.customDates?.length || 0} dates)</span>
+                                                        </button>
+                                                    </div>
+                                                    
+                                                    {expandedCustomDates[group.id] && (
+                                                        <div className="mt-2 space-y-2">
+                                                            {group.customDates && group.customDates.map((dateObj, idx) => (
+                                                                <div key={idx} className="bg-gray-100 p-3 rounded border border-gray-300">
+                                                                    <div className="flex items-center gap-2 mb-2">
+                                                                        <span className="flex-1 text-black font-bold">
+                                                                            {new Date(dateObj.date).toLocaleDateString()}
+                                                                        </span>
+                                                                        <span className="text-sm text-gray-600">{getFrequencyLabel(dateObj.frequency || 'monthly')}</span>
+                                                                        <button
+                                                                            onClick={() => removeCustomDate(group.id, dateObj.date)}
+                                                                            className="text-red-600 hover:text-red-800 p-1"
+                                                                        >
+                                                                            <Trash size={16} />
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                            
+                                                            <div className="bg-blue-50 p-3 rounded border-2 border-blue-200">
+                                                                <div className="flex gap-2 mb-2">
+                                                                    <input
+                                                                        type="date"
+                                                                        value={newCustomDate}
+                                                                        onChange={(e) => setNewCustomDate(e.target.value)}
+                                                                        className="border-2 border-gray-300 rounded px-3 py-1 flex-1 text-black font-medium"
+                                                                    />
+                                                                    <select
+                                                                        value={newCustomFrequency}
+                                                                        onChange={(e) => setNewCustomFrequency(e.target.value)}
+                                                                        className="border-2 border-gray-300 rounded px-3 py-1 text-black font-medium"
+                                                                    >
+                                                                        <option value="weekly">Weekly</option>
+                                                                        <option value="biweekly">Bi-Weekly</option>
+                                                                        <option value="bimonthly">Bi-Monthly</option>
+                                                                        <option value="monthly">Monthly</option>
+                                                                        <option value="custom_range">Custom Range</option>
+                                                                    </select>
+                                                                    <button
+                                                                        onClick={() => addCustomDate(group.id)}
+                                                                        className="bg-blue-600 text-white px-4 py-1 rounded hover:bg-blue-700 font-semibold"
+                                                                    >
+                                                                        Add Date
+                                                                    </button>
+                                                                </div>
+                                                                
+                                                                {newCustomFrequency === 'custom_range' && (
+                                                                    <div className="flex gap-2 mt-2 pl-4 border-l-4 border-blue-600">
+                                                                        <div className="flex items-center gap-2">
+                                                                            <span className="text-xs font-semibold text-black">From:</span>
+                                                                            <input
+                                                                                type="date"
+                                                                                value={newCustomFrom}
+                                                                                onChange={(e) => setNewCustomFrom(e.target.value)}
+                                                                                className="border-2 border-gray-300 rounded px-2 py-1 text-sm text-black font-medium"
+                                                                            />
+                                                                        </div>
+                                                                        <div className="flex items-center gap-2">
+                                                                            <span className="text-xs font-semibold text-black">Through:</span>
+                                                                            <input
+                                                                                type="date"
+                                                                                value={newCustomThrough}
+                                                                                onChange={(e) => setNewCustomThrough(e.target.value)}
+                                                                                className="border-2 border-gray-300 rounded px-2 py-1 text-sm text-black font-medium"
+                                                                            />
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+
+                                            <div>
+                                                <span className="font-semibold text-black">Facilities:</span>
+                                                <div className="mt-2 space-y-2">
+                                                    {group.facilities.map(f => (
+                                                        <div key={f.id} className="flex items-center justify-between bg-gray-100 p-2 rounded">
+                                                            <span className="text-black font-medium">• {f.name}</span>
+                                                            <button
+                                                                onClick={() => removeFacility(group.id, f.id)}
+                                                                className="text-red-600 hover:text-red-800 p-1"
+                                                            >
+                                                                <Trash size={16} />
+                                                            </button>
+                                                        </div>
+                                                    ))}
+                                                    
+                                                    {addingToGroup === group.id ? (
+                                                        <div className="flex gap-2 mt-2">
+                                                            <input
+                                                                type="text"
+                                                                value={newFacilityName}
+                                                                onChange={(e) => setNewFacilityName(e.target.value)}
+                                                                placeholder="Facility name"
+                                                                className="border-2 border-gray-300 rounded px-3 py-1 flex-1 text-black font-medium"
+                                                                autoFocus
+                                                            />
+                                                            <button
+                                                                onClick={() => addFacility(group.id)}
+                                                                className="bg-green-600 text-white px-4 py-1 rounded hover:bg-green-700 font-semibold"
+                                                            >
+                                                                Add
+                                                            </button>
+                                                            <button
+                                                                onClick={() => {
+                                                                    setAddingToGroup(null);
+                                                                    setNewFacilityName('');
+                                                                }}
+                                                                className="bg-gray-400 text-white px-4 py-1 rounded hover:bg-gray-500 font-semibold"
+                                                            >
+                                                                Cancel
+                                                            </button>
+                                                        </div>
+                                                    ) : (
+                                                        <button
+                                                            onClick={() => setAddingToGroup(group.id)}
+                                                            className="w-full border-2 border-dashed border-gray-400 rounded p-2 hover:border-blue-500 hover:bg-blue-50 transition-colors text-black font-semibold"
+                                                        >
+                                                            + Add Facility
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+
+                                <button
+                                    onClick={async () => {
+                                        try {
+                                            const response = await fetch(`${API_URL}/facility-groups`, {
+                                                method: 'POST',
+                                                headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({
+                                                    name: 'New Group',
+                                                    billingType: 'monthly',
+                                                    billingDay: 1
+                                                })
+                                            });
+
+                                            if (!response.ok) {
+                                                throw new Error('Failed to create group');
+                                            }
+
+                                            const result = await response.json();
+                                            
+                                            setFacilityGroups([...facilityGroups, {
+                                                id: result.id,
+                                                name: 'New Group',
+                                                billingType: 'monthly',
+                                                billingDay: 1,
+                                                customDates: [],
+                                                facilities: []
+                                            }]);
+                                        } catch (err) {
+                                            console.error('Error creating group:', err);
+                                            alert('Failed to create group. Please try again.');
+                                        }
+                                    }}
+                                    className="w-full border-3 border-dashed border-gray-400 rounded-lg p-5 hover:border-blue-600 hover:bg-blue-50 transition-colors bg-white"
+                                >
+                                    <div className="flex items-center justify-center">
+                                        <Plus />
+                                        <span className="ml-2 font-bold text-black">Add New Group</span>
+                                    </div>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const selectedGroupData = facilityGroups.find(g => g.id === selectedGroup);
+            
+            const getCycleLabel = (cycle) => {
+                if (cycle === 0) return 'Current Cycle';
+                if (cycle > 0) return `${cycle} ${cycle === 1 ? 'Cycle' : 'Cycles'} Ago`;
+                return `${Math.abs(cycle)} ${Math.abs(cycle) === 1 ? 'Cycle' : 'Cycles'} Ahead`;
+            };
+            
+            const getBillingTypeDisplay = (type) => {
+                switch(type) {
+                    case 'weekly': return 'Weekly';
+                    case 'biweekly': return 'Bi-Weekly';
+                    case 'bimonthly': return 'Bi-Monthly';
+                    case 'monthly': return 'Monthly';
+                    case 'custom': return 'Custom';
+                    default: return type;
+                }
+            };
+
+            if (loading) {
+                return (
+                    <div className="flex h-screen items-center justify-center bg-gray-200">
+                        <div className="text-center">
+                            <div className="text-2xl font-bold text-black mb-4">Loading Billing Tracker...</div>
+                            <div className="text-gray-600">Please wait</div>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (error) {
+                return (
+                    <div className="flex h-screen items-center justify-center bg-gray-200">
+                        <div className="text-center bg-red-50 border-2 border-red-300 rounded-lg p-8">
+                            <div className="text-2xl font-bold text-red-700 mb-4">Error Loading Data</div>
+                            <div className="text-red-600 mb-4">{error}</div>
+                            <button
+                                onClick={loadAllData}
+                                className="bg-red-600 text-white px-6 py-2 rounded hover:bg-red-700 font-semibold"
+                            >
+                                Retry
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="flex h-screen bg-gray-200">
+                    <div className="w-64 bg-white border-r-2 border-gray-300">
+                        <div className="p-4 border-b-2 border-gray-300 bg-gray-100">
+                            <h1 className="text-xl font-bold text-black">Billing Tracker</h1>
+                        </div>
+                        
+                        <div className="border-b-2 border-gray-300 bg-gray-50">
+                            <button
+                                onClick={() => setActiveTab('billing')}
+                                className={`w-1/2 inline-block px-4 py-3 text-center font-semibold transition-colors ${
+                                    activeTab === 'billing'
+                                        ? 'bg-white text-blue-600 border-b-4 border-blue-600'
+                                        : 'text-gray-600 hover:bg-gray-100'
+                                }`}
+                            >
+                                Billing
+                            </button>
+                            <button
+                                onClick={() => setActiveTab('monthend')}
+                                className={`w-1/2 inline-block px-4 py-3 text-center font-semibold transition-colors ${
+                                    activeTab === 'monthend'
+                                        ? 'bg-white text-blue-600 border-b-4 border-blue-600'
+                                        : 'text-gray-600 hover:bg-gray-100'
+                                }`}
+                            >
+                                Month End
+                            </button>
+                        </div>
+                        
+                        <div className="p-2">
+                            {facilityGroups.map(group => (
+                                <button
+                                    key={group.id}
+                                    onClick={() => setSelectedGroup(group.id)}
+                                    className={`w-full text-left px-4 py-3 rounded-lg mb-1 transition-colors border-2 ${
+                                        selectedGroup === group.id
+                                            ? 'bg-blue-600 text-white border-blue-700 font-semibold'
+                                            : 'hover:bg-gray-100 text-black border-gray-300 font-medium'
+                                    }`}
+                                >
+                                    <div className="font-bold">{group.name}</div>
+                                    <div className="text-xs mt-1">
+                                        {getBillingTypeDisplay(group.billingType)} Billing
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className="absolute bottom-4 left-4 right-4">
+                            <button
+                                onClick={() => setShowSettings(true)}
+                                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors border-2 border-gray-400 font-semibold text-black"
+                            >
+                                <Settings />
+                                <span>Settings</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="flex-1 flex flex-col">
+                        {activeTab === 'billing' ? (
+                            <>
+                                <div className="bg-white border-b-2 border-gray-300 p-4">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <h2 className="text-2xl font-bold text-black">{selectedGroupData?.name}</h2>
+                                            <p className="text-sm text-gray-700 mt-1 font-medium">
+                                                {getBillingTypeDisplay(selectedGroupData?.billingType)} Billing Schedule
+                                            </p>
+                                        </div>
+                                        
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={() => setCurrentCycle(Math.min(
+                                                    selectedGroupData?.billingType === 'custom' 
+                                                        ? Math.max(0, (selectedGroupData?.customDates?.length || 1) - 1)
+                                                        : MAX_PAST_CYCLES, 
+                                                    currentCycle + 1
+                                                ))}
+                                                disabled={currentCycle === (
+                                                    selectedGroupData?.billingType === 'custom' 
+                                                        ? Math.max(0, (selectedGroupData?.customDates?.length || 1) - 1)
+                                                        : MAX_PAST_CYCLES
+                                                )}
+                                                className="p-2 hover:bg-gray-200 rounded disabled:opacity-50 border-2 border-gray-300"
+                                            >
+                                                <ChevronLeft />
+                                            </button>
+                                            <span className="px-4 py-2 bg-gray-200 rounded font-bold text-black border-2 border-gray-400 min-w-[140px] text-center">
+                                                {getCycleLabel(currentCycle)}
+                                            </span>
+                                            <button
+                                                onClick={() => setCurrentCycle(Math.max(
+                                                    selectedGroupData?.billingType === 'custom' ? 0 : -MAX_FUTURE_CYCLES, 
+                                                    currentCycle - 1
+                                                ))}
+                                                disabled={currentCycle === (selectedGroupData?.billingType === 'custom' ? 0 : -MAX_FUTURE_CYCLES)}
+                                                className="p-2 hover:bg-gray-200 rounded disabled:opacity-50 border-2 border-gray-300"
+                                            >
+                                                <ChevronRight />
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="flex-1 overflow-auto p-6">
+                                    {selectedGroupData?.billingType === 'custom' && (!selectedGroupData?.customDates || selectedGroupData?.customDates.length === 0) ? (
+                                        <div className="bg-white rounded-lg border-2 border-gray-300 p-12 text-center">
+                                            <h3 className="text-xl font-bold text-black mb-3">No Custom Billing Dates</h3>
+                                            <p className="text-gray-600 mb-4">
+                                                This group uses custom billing but no dates have been configured yet.
+                                            </p>
+                                            <button
+                                                onClick={() => setShowSettings(true)}
+                                                className="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors"
+                                            >
+                                                Add Custom Dates in Settings
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div className="bg-white rounded-lg border-2 border-gray-300">
+                                            <table className="w-full">
+                                                <thead className="bg-gray-200 border-b-2 border-gray-300">
+                                                    <tr>
+                                                        <th className="px-6 py-3 text-left text-xs font-bold text-black uppercase tracking-wider">
+                                                            Facility Name
+                                                        </th>
+                                                        <th className="px-6 py-3 text-left text-xs font-bold text-black uppercase tracking-wider">
+                                                            Billed Date
+                                                        </th>
+                                                        <th className="px-6 py-3 text-left text-xs font-bold text-black uppercase tracking-wider">
+                                                            From Date
+                                                        </th>
+                                                        <th className="px-6 py-3 text-left text-xs font-bold text-black uppercase tracking-wider">
+                                                            Through Date
+                                                        </th>
+                                                        <th className="px-6 py-3 text-left text-xs font-bold text-black uppercase tracking-wider">
+                                                            Paid Amount
+                                                        </th>
+                                                        <th className="px-6 py-3 text-left text-xs font-bold text-black uppercase tracking-wider">
+                                                            Paid Date
+                                                        </th>
+                                                        <th className="px-6 py-3 text-left text-xs font-bold text-black uppercase tracking-wider">
+                                                            Actions
+                                                        </th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y-2 divide-gray-200">
+                                                    {selectedGroupData?.facilities.map(facility => {
+                                                        const key = `${facility.id}-${currentCycle}`;
+                                                        const record = billingRecords[key];
+                                                        const isEditing = editingRecord === key;
+
+                                                        if (!record || !record.billingDate) {
+                                                            return null;
+                                                        }
+
+                                                        return (
+                                                            <tr key={key} className="hover:bg-gray-50">
+                                                                <td className="px-6 py-4 whitespace-nowrap font-bold text-black">
+                                                                    {facility.name}
+                                                                </td>
+                                                                <td className="px-6 py-4 whitespace-nowrap text-black font-semibold">
+                                                                    {displayDate(record.billingDate)}
+                                                                </td>
+                                                                <td className="px-6 py-4 whitespace-nowrap text-black font-semibold">
+                                                                    {displayDate(record.fromDate)}
+                                                                </td>
+                                                                <td className="px-6 py-4 whitespace-nowrap text-black font-semibold">
+                                                                    {displayDate(record.throughDate)}
+                                                                </td>
+                                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                                    {isEditing ? (
+                                                                        <input
+                                                                            type="text"
+                                                                            value={record.paidAmount || ''}
+                                                                            onChange={(e) => handleSaveRecord(key, { paidAmount: e.target.value })}
+                                                                            className="border-2 border-gray-300 rounded px-2 py-1 w-28 font-semibold text-black"
+                                                                            placeholder="$0.00"
+                                                                        />
+                                                                    ) : (
+                                                                        <span className={record.paidAmount ? 'text-green-700 font-bold' : 'text-gray-400 font-semibold'}>
+                                                                            {record.paidAmount || '—'}
+                                                                        </span>
+                                                                    )}
+                                                                </td>
+                                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                                    {isEditing ? (
+                                                                        <input
+                                                                            type="text"
+                                                                            value={record.paidDate || ''}
+                                                                            onChange={(e) => handleSaveRecord(key, { paidDate: e.target.value })}
+                                                                            className="border-2 border-gray-300 rounded px-2 py-1 w-28 font-semibold text-black"
+                                                                            placeholder="MMDDYYYY"
+                                                                        />
+                                                                    ) : (
+                                                                        <span className={record.paidDate ? 'text-black font-semibold' : 'text-gray-400 font-semibold'}>
+                                                                            {displayDate(record.paidDate) || '—'}
+                                                                        </span>
+                                                                    )}
+                                                                </td>
+                                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                                    <button
+                                                                        onClick={() => setEditingRecord(isEditing ? null : key)}
+                                                                        className="text-blue-600 hover:text-blue-800 font-bold"
+                                                                    >
+                                                                        {isEditing ? <Save /> : <Edit2 />}
+                                                                    </button>
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
+                                </div>
+                            </>
+                        ) : (
+                            <div className="flex-1 flex flex-col items-center justify-center p-6">
+                                {monthEndUrl ? (
+                                    <div className="text-center">
+                                        <h2 className="text-2xl font-bold text-black mb-4">Month End Tracker</h2>
+                                        <a
+                                            href={monthEndUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="inline-block bg-blue-600 text-white px-8 py-4 rounded-lg font-bold text-lg hover:bg-blue-700 transition-colors border-2 border-blue-700"
+                                        >
+                                            Open Month End Tracker
+                                        </a>
+                                    </div>
+                                ) : (
+                                    <div className="text-center">
+                                        <h2 className="text-2xl font-bold text-black mb-4">Month End Tracker</h2>
+                                        <p className="text-gray-600 mb-4">No URL configured yet.</p>
+                                        <button
+                                            onClick={() => setShowSettings(true)}
+                                            className="bg-gray-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-gray-700 transition-colors"
+                                        >
+                                            Configure in Settings
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    {showSettings && <SettingsPanel />}
+                </div>
+            );
+        };
+
+        ReactDOM.render(<BillingTracker />, document.getElementById('root'));
+    </script>
+</body>
+</html>

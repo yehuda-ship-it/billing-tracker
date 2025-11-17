@@ -1,0 +1,358 @@
+import psycopg2
+from psycopg2.extras import RealDictCursor
+import os
+import json
+
+class Database:
+    def __init__(self):
+        """Initialize database connection"""
+        self.db_url = os.environ.get('DATABASE_URL')
+        if not self.db_url:
+            raise Exception("DATABASE_URL environment variable not set")
+        
+        # Railway provides DATABASE_URL in the correct format
+        self.conn = psycopg2.connect(self.db_url)
+        self.create_tables()
+    
+    def create_tables(self):
+        """Create all necessary tables if they don't exist"""
+        with self.conn.cursor() as cur:
+            # Facility Groups table
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS facility_groups (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(255) NOT NULL,
+                    billing_type VARCHAR(50) NOT NULL,
+                    billing_day INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            # Facilities table
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS facilities (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(255) NOT NULL,
+                    group_id INTEGER REFERENCES facility_groups(id) ON DELETE CASCADE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            # Billing Records table
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS billing_records (
+                    id SERIAL PRIMARY KEY,
+                    facility_id INTEGER REFERENCES facilities(id) ON DELETE CASCADE,
+                    cycle INTEGER NOT NULL,
+                    billing_date VARCHAR(8),
+                    from_date VARCHAR(8),
+                    through_date VARCHAR(8),
+                    paid_amount VARCHAR(50),
+                    paid_date VARCHAR(8),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(facility_id, cycle)
+                )
+            ''')
+            
+            # Custom Dates table
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS custom_dates (
+                    id SERIAL PRIMARY KEY,
+                    group_id INTEGER REFERENCES facility_groups(id) ON DELETE CASCADE,
+                    date VARCHAR(8) NOT NULL,
+                    frequency VARCHAR(50),
+                    custom_from VARCHAR(10),
+                    custom_through VARCHAR(10),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            # Settings table
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS settings (
+                    id SERIAL PRIMARY KEY,
+                    key VARCHAR(100) UNIQUE NOT NULL,
+                    value TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            self.conn.commit()
+            
+            # Insert default data if tables are empty
+            self._insert_default_data()
+    
+    def _insert_default_data(self):
+        """Insert default data if database is empty"""
+        with self.conn.cursor() as cur:
+            # Check if we have any groups
+            cur.execute('SELECT COUNT(*) FROM facility_groups')
+            count = cur.fetchone()[0]
+            
+            if count == 0:
+                # Insert default groups
+                cur.execute('''
+                    INSERT INTO facility_groups (id, name, billing_type, billing_day)
+                    VALUES 
+                        (1, 'Alabama Facilities', 'monthly', 1),
+                        (2, 'Weekly Facilities', 'weekly', 5)
+                ''')
+                
+                # Insert default facilities
+                cur.execute('''
+                    INSERT INTO facilities (id, name, group_id)
+                    VALUES 
+                        (1, 'Birmingham Care Center', 1),
+                        (2, 'Montgomery Health', 1),
+                        (3, 'Phoenix Center', 2),
+                        (4, 'Sunrise Health', 2)
+                ''')
+                
+                self.conn.commit()
+    
+    # ========================================================================
+    # FACILITY GROUPS
+    # ========================================================================
+    
+    def get_facility_groups(self):
+        """Get all facility groups with their facilities and custom dates"""
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute('''
+                SELECT id, name, billing_type, billing_day
+                FROM facility_groups
+                ORDER BY id
+            ''')
+            groups = cur.fetchall()
+            
+            # Get facilities and custom dates for each group
+            for group in groups:
+                # Get facilities
+                cur.execute('''
+                    SELECT id, name
+                    FROM facilities
+                    WHERE group_id = %s
+                    ORDER BY id
+                ''', (group['id'],))
+                group['facilities'] = cur.fetchall()
+                
+                # Get custom dates
+                cur.execute('''
+                    SELECT date, frequency, custom_from, custom_through
+                    FROM custom_dates
+                    WHERE group_id = %s
+                    ORDER BY date DESC
+                ''', (group['id'],))
+                custom_dates = cur.fetchall()
+                
+                # Convert to format expected by frontend
+                group['customDates'] = []
+                for cd in custom_dates:
+                    date_obj = {'date': cd['date'], 'frequency': cd['frequency']}
+                    if cd['custom_from']:
+                        date_obj['customFrom'] = cd['custom_from']
+                    if cd['custom_through']:
+                        date_obj['customThrough'] = cd['custom_through']
+                    group['customDates'].append(date_obj)
+                
+                # Convert snake_case to camelCase for frontend
+                group['billingType'] = group.pop('billing_type')
+                group['billingDay'] = group.pop('billing_day')
+            
+            return groups
+    
+    def create_facility_group(self, data):
+        """Create a new facility group"""
+        with self.conn.cursor() as cur:
+            cur.execute('''
+                INSERT INTO facility_groups (name, billing_type, billing_day)
+                VALUES (%s, %s, %s)
+                RETURNING id
+            ''', (data['name'], data['billingType'], data.get('billingDay')))
+            group_id = cur.fetchone()[0]
+            self.conn.commit()
+            return group_id
+    
+    def update_facility_group(self, group_id, data):
+        """Update a facility group"""
+        with self.conn.cursor() as cur:
+            cur.execute('''
+                UPDATE facility_groups
+                SET name = %s, billing_type = %s, billing_day = %s, updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+            ''', (data['name'], data['billingType'], data.get('billingDay'), group_id))
+            self.conn.commit()
+    
+    def delete_facility_group(self, group_id):
+        """Delete a facility group (cascades to facilities and records)"""
+        with self.conn.cursor() as cur:
+            cur.execute('DELETE FROM facility_groups WHERE id = %s', (group_id,))
+            self.conn.commit()
+    
+    # ========================================================================
+    # FACILITIES
+    # ========================================================================
+    
+    def get_facilities(self):
+        """Get all facilities"""
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute('''
+                SELECT id, name, group_id
+                FROM facilities
+                ORDER BY id
+            ''')
+            facilities = cur.fetchall()
+            
+            # Convert snake_case to camelCase
+            for f in facilities:
+                f['groupId'] = f.pop('group_id')
+            
+            return facilities
+    
+    def create_facility(self, data):
+        """Create a new facility"""
+        with self.conn.cursor() as cur:
+            cur.execute('''
+                INSERT INTO facilities (name, group_id)
+                VALUES (%s, %s)
+                RETURNING id
+            ''', (data['name'], data['groupId']))
+            facility_id = cur.fetchone()[0]
+            self.conn.commit()
+            return facility_id
+    
+    def delete_facility(self, facility_id):
+        """Delete a facility (cascades to billing records)"""
+        with self.conn.cursor() as cur:
+            cur.execute('DELETE FROM facilities WHERE id = %s', (facility_id,))
+            self.conn.commit()
+    
+    # ========================================================================
+    # BILLING RECORDS
+    # ========================================================================
+    
+    def get_billing_records(self):
+        """Get all billing records"""
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute('''
+                SELECT 
+                    facility_id, cycle, billing_date, from_date, through_date,
+                    paid_amount, paid_date
+                FROM billing_records
+            ''')
+            records = cur.fetchall()
+            
+            # Convert to format expected by frontend (keyed by facility_id-cycle)
+            records_dict = {}
+            for r in records:
+                key = f"{r['facility_id']}-{r['cycle']}"
+                records_dict[key] = {
+                    'facilityId': r['facility_id'],
+                    'cycle': r['cycle'],
+                    'billingDate': r['billing_date'],
+                    'fromDate': r['from_date'],
+                    'throughDate': r['through_date'],
+                    'paidAmount': r['paid_amount'] or '',
+                    'paidDate': r['paid_date'] or ''
+                }
+            
+            return records_dict
+    
+    def save_billing_record(self, data):
+        """Create or update a billing record"""
+        with self.conn.cursor() as cur:
+            cur.execute('''
+                INSERT INTO billing_records 
+                    (facility_id, cycle, billing_date, from_date, through_date, paid_amount, paid_date)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (facility_id, cycle) 
+                DO UPDATE SET
+                    billing_date = EXCLUDED.billing_date,
+                    from_date = EXCLUDED.from_date,
+                    through_date = EXCLUDED.through_date,
+                    paid_amount = EXCLUDED.paid_amount,
+                    paid_date = EXCLUDED.paid_date,
+                    updated_at = CURRENT_TIMESTAMP
+            ''', (
+                data['facilityId'],
+                data['cycle'],
+                data.get('billingDate'),
+                data.get('fromDate'),
+                data.get('throughDate'),
+                data.get('paidAmount', ''),
+                data.get('paidDate', '')
+            ))
+            self.conn.commit()
+    
+    # ========================================================================
+    # CUSTOM DATES
+    # ========================================================================
+    
+    def get_custom_dates(self, group_id):
+        """Get custom dates for a group"""
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute('''
+                SELECT date, frequency, custom_from, custom_through
+                FROM custom_dates
+                WHERE group_id = %s
+                ORDER BY date DESC
+            ''', (group_id,))
+            return cur.fetchall()
+    
+    def save_custom_dates(self, group_id, dates):
+        """Save custom dates for a group (replaces all existing)"""
+        with self.conn.cursor() as cur:
+            # Delete existing
+            cur.execute('DELETE FROM custom_dates WHERE group_id = %s', (group_id,))
+            
+            # Insert new dates
+            for date_obj in dates:
+                cur.execute('''
+                    INSERT INTO custom_dates (group_id, date, frequency, custom_from, custom_through)
+                    VALUES (%s, %s, %s, %s, %s)
+                ''', (
+                    group_id,
+                    date_obj['date'],
+                    date_obj.get('frequency', 'monthly'),
+                    date_obj.get('customFrom'),
+                    date_obj.get('customThrough')
+                ))
+            
+            self.conn.commit()
+    
+    # ========================================================================
+    # SETTINGS
+    # ========================================================================
+    
+    def get_settings(self):
+        """Get all settings"""
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute('SELECT key, value FROM settings')
+            settings = cur.fetchall()
+            
+            # Convert to dict
+            settings_dict = {}
+            for s in settings:
+                settings_dict[s['key']] = s['value']
+            
+            return settings_dict
+    
+    def save_settings(self, settings):
+        """Save settings"""
+        with self.conn.cursor() as cur:
+            for key, value in settings.items():
+                cur.execute('''
+                    INSERT INTO settings (key, value)
+                    VALUES (%s, %s)
+                    ON CONFLICT (key)
+                    DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
+                ''', (key, value))
+            
+            self.conn.commit()
+    
+    def __del__(self):
+        """Close database connection"""
+        if hasattr(self, 'conn'):
+            self.conn.close()
