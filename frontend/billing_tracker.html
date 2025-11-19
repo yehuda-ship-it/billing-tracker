@@ -1087,23 +1087,20 @@
                                                                 <td className="px-6 py-4 whitespace-nowrap text-black font-semibold">
                                                                     {displayDate(record.throughDate)}
                                                                 </td>
-																	<td className="px-6 py-4 whitespace-nowrap">
-																		<select
-																			value={record.statusId || ''}
-																			onChange={(e) => {
-																				const newStatusId = e.target.value ? parseInt(e.target.value) : null;
-																				handleSaveRecord(key, { statusId: newStatusId });
-																			}}
-																			className="border-2 border-gray-300 rounded px-2 py-1 font-semibold text-black bg-white"
-																		>
-																			<option value="">No Status</option>
-																			{groupStatuses.map(status => (
-																				<option key={status.id} value={status.id}>
-																					{status.name}
-																				</option>
-																			))}
-																		</select>
-																	</td>
+                                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                                    {isEditing ? (
+                                                                        <select
+                                                                            value={record.statusId || ''}
+                                                                            onChange={(e) => handleSaveRecord(key, { statusId: e.target.value ? parseInt(e.target.value) : null })}
+                                                                            className="border-2 border-gray-300 rounded px-2 py-1 font-semibold text-black"
+                                                                        >
+                                                                            <option value="">No Status</option>
+                                                                            {groupStatuses.map(status => (
+                                                                                <option key={status.id} value={status.id}>
+                                                                                    {status.name}
+                                                                                </option>
+                                                                            ))}
+                                                                        </select>
                                                                     ) : (
                                                                         <StatusBadge status={currentStatus} />
                                                                     )}
