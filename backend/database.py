@@ -115,7 +115,7 @@ class Database:
             
 
             
-def _run_migrations(self):
+    def _run_migrations(self):
         """Run database migrations for schema updates"""
         with self.conn.cursor() as cur:
             try:
