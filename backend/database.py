@@ -577,4 +577,4 @@ class Database:
     def __del__(self):
         """Close database connection"""
         if hasattr(self, 'conn'):
-            self.conn.close()
+            //self.conn.close()
