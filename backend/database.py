@@ -104,10 +104,42 @@ class Database:
                 )
             ''')
             
+            
             self.conn.commit()
+            
+            # Run migrations for existing tables
+            self._run_migrations()
             
             # Insert default data if tables are empty
             self._insert_default_data()
+            
+    def _run_migrations(self):
+        """Run database migrations for schema updates"""
+        with self.conn.cursor() as cur:
+            try:
+                # Add status_group_id to facility_groups if not exists
+                cur.execute('''
+                    ALTER TABLE facility_groups 
+                    ADD COLUMN IF NOT EXISTS status_group_id INTEGER REFERENCES status_groups(id) DEFAULT 1
+                ''')
+                
+                # Add new columns to billing_records if not exists
+                cur.execute('''
+                    ALTER TABLE billing_records 
+                    ADD COLUMN IF NOT EXISTS billed_amount VARCHAR(50)
+                ''')
+                
+                cur.execute('''
+                    ALTER TABLE billing_records 
+                    ADD COLUMN IF NOT EXISTS status_id INTEGER REFERENCES billing_statuses(id)
+                ''')
+                
+                self.conn.commit()
+            except Exception as e:
+                self.conn.rollback()
+                print(f"Migration error (may be safe to ignore): {e}")
+                
+                
     
     def _insert_default_data(self):
         """Insert default data if database is empty"""
