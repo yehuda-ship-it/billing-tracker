@@ -115,17 +115,35 @@ class Database:
             
 
             
-    def _run_migrations(self):
+def _run_migrations(self):
         """Run database migrations for schema updates"""
         with self.conn.cursor() as cur:
             try:
-                # Add status_group_id to facility_groups if not exists
+                # Insert status group first if it doesn't exist
                 cur.execute('''
-                    ALTER TABLE facility_groups 
-                    ADD COLUMN IF NOT EXISTS status_group_id INTEGER REFERENCES status_groups(id) DEFAULT 1
+                    INSERT INTO status_groups (id, name, is_default)
+                    VALUES (1, 'Default', true)
+                    ON CONFLICT (id) DO NOTHING
                 ''')
                 
-                # Add new columns to billing_records if not exists
+                # Insert default statuses if they don't exist
+                cur.execute('''
+                    INSERT INTO billing_statuses (status_group_id, name, color, sort_order)
+                    VALUES 
+                        (1, 'Not Billed', '#93C5FD', 1),
+                        (1, 'Billed', '#FDE047', 2),
+                        (1, 'Pending', '#C4B5FD', 3),
+                        (1, 'Approved', '#86EFAC', 4),
+                        (1, 'Paid', '#22C55E', 5)
+                    ON CONFLICT DO NOTHING
+                ''')
+                
+                # Now add columns (without foreign key constraints to avoid errors)
+                cur.execute('''
+                    ALTER TABLE facility_groups 
+                    ADD COLUMN IF NOT EXISTS status_group_id INTEGER DEFAULT 1
+                ''')
+                
                 cur.execute('''
                     ALTER TABLE billing_records 
                     ADD COLUMN IF NOT EXISTS billed_amount VARCHAR(50)
@@ -133,13 +151,14 @@ class Database:
                 
                 cur.execute('''
                     ALTER TABLE billing_records 
-                    ADD COLUMN IF NOT EXISTS status_id INTEGER REFERENCES billing_statuses(id)
+                    ADD COLUMN IF NOT EXISTS status_id INTEGER
                 ''')
                 
                 self.conn.commit()
+                print("Migration completed successfully")
             except Exception as e:
                 self.conn.rollback()
-                print(f"Migration error (may be safe to ignore): {e}")
+                print(f"Migration error: {e}")
                 
                 
     
