@@ -107,11 +107,13 @@ class Database:
             
             self.conn.commit()
             
-            # Run migrations for existing tables
+           # Insert default data if tables are empty
+            self._insert_default_data()
+            
+           # Run migrations for existing tables
             self._run_migrations()
             
-            # Insert default data if tables are empty
-            self._insert_default_data()
+
             
     def _run_migrations(self):
         """Run database migrations for schema updates"""
