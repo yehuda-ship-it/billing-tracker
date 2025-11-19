@@ -28,22 +28,6 @@
         const Plus = ({ size = 20 }) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>;
         const Trash = ({ size = 18 }) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"></path></svg>;
 
-
-		// Color palette for status picker
-				const STATUS_COLORS = [
-					{ name: 'Soft Blue', value: '#93C5FD' },
-					{ name: 'Soft Yellow', value: '#FDE047' },
-					{ name: 'Soft Purple', value: '#C4B5FD' },
-					{ name: 'Soft Green', value: '#86EFAC' },
-					{ name: 'Rich Green', value: '#22C55E' },
-					{ name: 'Soft Orange', value: '#FDBA74' },
-					{ name: 'Soft Red', value: '#FCA5A5' },
-					{ name: 'Soft Gray', value: '#D1D5DB' },
-					{ name: 'Soft Teal', value: '#5EEAD4' },
-					{ name: 'Soft Pink', value: '#F9A8D4' }
-				];
-
-
         const BillingTracker = () => {
             const [facilityGroups, setFacilityGroups] = useState([]);
             const [billingRecords, setBillingRecords] = useState({});
@@ -53,8 +37,6 @@
             const [editingRecord, setEditingRecord] = useState(null);
             const [monthEndUrl, setMonthEndUrl] = useState('');
             const [activeTab, setActiveTab] = useState('billing');
-			const [statusGroups, setStatusGroups] = useState([]);
-			const [allStatuses, setAllStatuses] = useState([]);
             const [loading, setLoading] = useState(true);
             const [error, setError] = useState(null);
 
@@ -90,53 +72,15 @@
                     // Load settings
                     const settingsRes = await fetch(`${API_URL}/settings`);
                     if (!settingsRes.ok) throw new Error('Failed to load settings');
-					const settings = await settingsRes.json();
-					setMonthEndUrl(settings.monthEndUrl || '');
+                    const settings = await settingsRes.json();
+                    setMonthEndUrl(settings.monthEndUrl || '');
 
-					// Load status groups
-					const statusGroupsRes = await fetch(`${API_URL}/status-groups`);
-					if (!statusGroupsRes.ok) throw new Error('Failed to load status groups');
-					const statusGroupsData = await statusGroupsRes.json();
-					setStatusGroups(statusGroupsData);
-
-					// Load all statuses
-					const statusesRes = await fetch(`${API_URL}/statuses`);
-					if (!statusesRes.ok) throw new Error('Failed to load statuses');
-					const statusesData = await statusesRes.json();
-					setAllStatuses(statusesData);
-
-					setLoading(false);
+                    setLoading(false);
                 } catch (err) {
                     console.error('Error loading data:', err);
                     setError(err.message);
                     setLoading(false);
                 }
-            };
-			
-			// Get statuses for a specific group
-            const getStatusesForGroup = (groupId) => {
-                const group = facilityGroups.find(g => g.id === groupId);
-                if (!group) return [];
-                
-                const statusGroupId = group.statusGroupId || 1; // Default to group 1
-                return allStatuses.filter(s => s.statusGroupId === statusGroupId);
-            };
-
-            // Status Badge Component
-            const StatusBadge = ({ status }) => {
-                if (!status) return <span className="text-gray-400 font-semibold">—</span>;
-                
-                return (
-                    <span 
-                        className="px-3 py-1 rounded-full text-sm font-semibold"
-                        style={{ 
-                            backgroundColor: status.color + '40', 
-                            color: status.color
-                        }}
-                    >
-                        {status.name}
-                    </span>
-                );
             };
 
             // Save billing record to API
@@ -306,8 +250,7 @@
                                     cycle: cycle,
                                     ...dates,
                                     paidAmount: '',
-                                    paidDate: '',
-									statusId: null
+                                    paidDate: ''
                                 };
                             }
                         }
@@ -324,8 +267,7 @@
                                     cycle: cycle,
                                     ...dates,
                                     paidAmount: '',
-                                    paidDate: '',
-									statusId: null
+                                    paidDate: ''
                                 };
                             }
                         }
@@ -1031,7 +973,7 @@
                                         <div className="bg-white rounded-lg border-2 border-gray-300">
                                             <table className="w-full">
                                                 <thead className="bg-gray-200 border-b-2 border-gray-300">
-													<tr>
+                                                    <tr>
                                                         <th className="px-6 py-3 text-left text-xs font-bold text-black uppercase tracking-wider">
                                                             Facility Name
                                                         </th>
@@ -1043,12 +985,6 @@
                                                         </th>
                                                         <th className="px-6 py-3 text-left text-xs font-bold text-black uppercase tracking-wider">
                                                             Through Date
-                                                        </th>
-                                                        <th className="px-6 py-3 text-left text-xs font-bold text-black uppercase tracking-wider">
-                                                            Status
-                                                        </th>
-                                                        <th className="px-6 py-3 text-left text-xs font-bold text-black uppercase tracking-wider">
-                                                            Billed Amount
                                                         </th>
                                                         <th className="px-6 py-3 text-left text-xs font-bold text-black uppercase tracking-wider">
                                                             Paid Amount
@@ -1066,8 +1002,6 @@
                                                         const key = `${facility.id}-${currentCycle}`;
                                                         const record = billingRecords[key];
                                                         const isEditing = editingRecord === key;
-                                                        const groupStatuses = getStatusesForGroup(selectedGroupData.id);
-                                                        const currentStatus = groupStatuses.find(s => s.id === record?.statusId);
 
                                                         if (!record || !record.billingDate) {
                                                             return null;
@@ -1086,39 +1020,6 @@
                                                                 </td>
                                                                 <td className="px-6 py-4 whitespace-nowrap text-black font-semibold">
                                                                     {displayDate(record.throughDate)}
-                                                                </td>
-                                                                <td className="px-6 py-4 whitespace-nowrap">
-                                                                    {isEditing ? (
-                                                                        <select
-                                                                            value={record.statusId || ''}
-                                                                            onChange={(e) => handleSaveRecord(key, { statusId: e.target.value ? parseInt(e.target.value) : null })}
-                                                                            className="border-2 border-gray-300 rounded px-2 py-1 font-semibold text-black"
-                                                                        >
-                                                                            <option value="">No Status</option>
-                                                                            {groupStatuses.map(status => (
-                                                                                <option key={status.id} value={status.id}>
-                                                                                    {status.name}
-                                                                                </option>
-                                                                            ))}
-                                                                        </select>
-                                                                    ) : (
-                                                                        <StatusBadge status={currentStatus} />
-                                                                    )}
-                                                                </td>
-																<td className="px-6 py-4 whitespace-nowrap">
-                                                                    {isEditing ? (
-                                                                        <input
-                                                                            type="text"
-                                                                            value={record.billedAmount || ''}
-                                                                            onChange={(e) => handleSaveRecord(key, { billedAmount: e.target.value })}
-                                                                            className="border-2 border-gray-300 rounded px-2 py-1 w-28 font-semibold text-black"
-                                                                            placeholder="$0.00"
-                                                                        />
-                                                                    ) : (
-                                                                        <span className={record.billedAmount ? 'text-blue-700 font-bold' : 'text-gray-400 font-semibold'}>
-                                                                            {record.billedAmount || '—'}
-                                                                        </span>
-                                                                    )}
                                                                 </td>
                                                                 <td className="px-6 py-4 whitespace-nowrap">
                                                                     {isEditing ? (
