@@ -281,7 +281,7 @@ class Database:
             cur.execute('''
                 SELECT 
                     facility_id, cycle, billing_date, from_date, through_date,
-                    paid_amount, paid_date
+                    billed_amount, paid_amount, paid_date, status_id
                 FROM billing_records
             ''')
             records = cur.fetchall()
@@ -296,8 +296,10 @@ class Database:
                     'billingDate': r['billing_date'],
                     'fromDate': r['from_date'],
                     'throughDate': r['through_date'],
+                    'billedAmount': r['billed_amount'] or '',
                     'paidAmount': r['paid_amount'] or '',
-                    'paidDate': r['paid_date'] or ''
+                    'paidDate': r['paid_date'] or '',
+                    'statusId': r['status_id']
                 }
             
             return records_dict
@@ -307,15 +309,18 @@ class Database:
         with self.conn.cursor() as cur:
             cur.execute('''
                 INSERT INTO billing_records 
-                    (facility_id, cycle, billing_date, from_date, through_date, paid_amount, paid_date)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    (facility_id, cycle, billing_date, from_date, through_date, 
+                     billed_amount, paid_amount, paid_date, status_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (facility_id, cycle) 
                 DO UPDATE SET
                     billing_date = EXCLUDED.billing_date,
                     from_date = EXCLUDED.from_date,
                     through_date = EXCLUDED.through_date,
+                    billed_amount = EXCLUDED.billed_amount,
                     paid_amount = EXCLUDED.paid_amount,
                     paid_date = EXCLUDED.paid_date,
+                    status_id = EXCLUDED.status_id,
                     updated_at = CURRENT_TIMESTAMP
             ''', (
                 data['facilityId'],
@@ -323,8 +328,10 @@ class Database:
                 data.get('billingDate'),
                 data.get('fromDate'),
                 data.get('throughDate'),
+                data.get('billedAmount', ''),
                 data.get('paidAmount', ''),
-                data.get('paidDate', '')
+                data.get('paidDate', ''),
+                data.get('statusId')
             ))
             self.conn.commit()
     
@@ -392,6 +399,126 @@ class Database:
                     DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
                 ''', (key, value))
             
+            self.conn.commit()
+            
+# ========================================================================
+    # STATUS GROUPS
+    # ========================================================================
+    
+    def get_status_groups(self):
+        """Get all status groups with their statuses"""
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute('''
+                SELECT id, name, is_default
+                FROM status_groups
+                ORDER BY is_default DESC, name
+            ''')
+            groups = cur.fetchall()
+            
+            # Get statuses for each group
+            for group in groups:
+                cur.execute('''
+                    SELECT id, name, color, sort_order
+                    FROM billing_statuses
+                    WHERE status_group_id = %s
+                    ORDER BY sort_order
+                ''', (group['id'],))
+                group['statuses'] = cur.fetchall()
+                
+                # Convert snake_case to camelCase for frontend
+                group['isDefault'] = group.pop('is_default')
+            
+            return groups
+    
+    def create_status_group(self, data):
+        """Create a new status group"""
+        with self.conn.cursor() as cur:
+            cur.execute('''
+                INSERT INTO status_groups (name, is_default)
+                VALUES (%s, %s)
+                RETURNING id
+            ''', (data['name'], data.get('isDefault', False)))
+            group_id = cur.fetchone()[0]
+            self.conn.commit()
+            return group_id
+    
+    # ========================================================================
+    # BILLING STATUSES
+    # ========================================================================
+    
+    def get_all_statuses(self):
+        """Get all statuses across all groups"""
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute('''
+                SELECT bs.id, bs.name, bs.color, bs.sort_order, bs.status_group_id,
+                       sg.name as group_name
+                FROM billing_statuses bs
+                JOIN status_groups sg ON bs.status_group_id = sg.id
+                ORDER BY sg.is_default DESC, bs.sort_order
+            ''')
+            statuses = cur.fetchall()
+            
+            # Convert to camelCase
+            for s in statuses:
+                s['sortOrder'] = s.pop('sort_order')
+                s['statusGroupId'] = s.pop('status_group_id')
+                s['groupName'] = s.pop('group_name')
+            
+            return statuses
+    
+    def get_statuses_by_group(self, group_id):
+        """Get statuses for a specific group"""
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute('''
+                SELECT id, name, color, sort_order
+                FROM billing_statuses
+                WHERE status_group_id = %s
+                ORDER BY sort_order
+            ''', (group_id,))
+            statuses = cur.fetchall()
+            
+            # Convert to camelCase
+            for s in statuses:
+                s['sortOrder'] = s.pop('sort_order')
+            
+            return statuses
+    
+    def create_status(self, data):
+        """Create a new status"""
+        with self.conn.cursor() as cur:
+            cur.execute('''
+                INSERT INTO billing_statuses (status_group_id, name, color, sort_order)
+                VALUES (%s, %s, %s, %s)
+                RETURNING id
+            ''', (
+                data['statusGroupId'],
+                data['name'],
+                data['color'],
+                data.get('sortOrder', 0)
+            ))
+            status_id = cur.fetchone()[0]
+            self.conn.commit()
+            return status_id
+    
+    def update_status(self, status_id, data):
+        """Update a status"""
+        with self.conn.cursor() as cur:
+            cur.execute('''
+                UPDATE billing_statuses
+                SET name = %s, color = %s, sort_order = %s, updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+            ''', (
+                data['name'],
+                data['color'],
+                data.get('sortOrder', 0),
+                status_id
+            ))
+            self.conn.commit()
+    
+    def delete_status(self, status_id):
+        """Delete a status"""
+        with self.conn.cursor() as cur:
+            cur.execute('DELETE FROM billing_statuses WHERE id = %s', (status_id,))
             self.conn.commit()
     
     def __del__(self):

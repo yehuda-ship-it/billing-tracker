@@ -168,6 +168,79 @@ def save_settings():
 def health_check():
     """Health check endpoint"""
     return jsonify({'status': 'healthy', 'database': 'connected'})
+# ============================================================================
+# STATUS GROUPS
+# ============================================================================
+
+@app.route('/api/status-groups', methods=['GET'])
+def get_status_groups():
+    """Get all status groups with their statuses"""
+    try:
+        groups = db.get_status_groups()
+        return jsonify(groups)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/status-groups', methods=['POST'])
+def create_status_group():
+    """Create a new status group"""
+    try:
+        data = request.json
+        group_id = db.create_status_group(data)
+        return jsonify({'id': group_id, 'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ============================================================================
+# BILLING STATUSES
+# ============================================================================
+
+@app.route('/api/statuses', methods=['GET'])
+def get_statuses():
+    """Get all statuses"""
+    try:
+        statuses = db.get_all_statuses()
+        return jsonify(statuses)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/statuses/<int:group_id>', methods=['GET'])
+def get_statuses_by_group(group_id):
+    """Get statuses for a specific group"""
+    try:
+        statuses = db.get_statuses_by_group(group_id)
+        return jsonify(statuses)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/statuses', methods=['POST'])
+def create_status():
+    """Create a new status"""
+    try:
+        data = request.json
+        status_id = db.create_status(data)
+        return jsonify({'id': status_id, 'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/statuses/<int:status_id>', methods=['PUT'])
+def update_status(status_id):
+    """Update a status"""
+    try:
+        data = request.json
+        db.update_status(status_id, data)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/statuses/<int:status_id>', methods=['DELETE'])
+def delete_status(status_id):
+    """Delete a status"""
+    try:
+        db.delete_status(status_id)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 # ============================================================================
 # ERROR HANDLERS
