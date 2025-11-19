@@ -17,6 +17,27 @@ class Database:
     def create_tables(self):
         """Create all necessary tables if they don't exist"""
         with self.conn.cursor() as cur:
+            # Status Groups table
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS status_groups (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(255) NOT NULL,
+                    is_default BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+
+            # Billing Statuses table
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS billing_statuses (
+                    id SERIAL PRIMARY KEY,
+                    status_group_id INTEGER REFERENCES status_groups(id) ON DELETE CASCADE,
+                    name VARCHAR(100) NOT NULL,
+                    color VARCHAR(20) NOT NULL,
+                    sort_order INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
             # Facility Groups table
             cur.execute('''
                 CREATE TABLE IF NOT EXISTS facility_groups (
@@ -24,6 +45,7 @@ class Database:
                     name VARCHAR(255) NOT NULL,
                     billing_type VARCHAR(50) NOT NULL,
                     billing_day INTEGER,
+                    status_group_id INTEGER REFERENCES status_groups(id) DEFAULT 1,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -49,6 +71,8 @@ class Database:
                     billing_date VARCHAR(8),
                     from_date VARCHAR(8),
                     through_date VARCHAR(8),
+                    billed_amount VARCHAR(50),
+                    status_id INTEGER REFERENCES billing_statuses(id),
                     paid_amount VARCHAR(50),
                     paid_date VARCHAR(8),
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -93,6 +117,24 @@ class Database:
             count = cur.fetchone()[0]
             
             if count == 0:
+                # Insert default status group
+                cur.execute('''
+                    INSERT INTO status_groups (id, name, is_default)
+                    VALUES (1, 'Default', true)
+                    ON CONFLICT (id) DO NOTHING
+                ''')
+
+                # Insert default statuses
+                cur.execute('''
+                    INSERT INTO billing_statuses (status_group_id, name, color, sort_order)
+                    VALUES 
+                        (1, 'Not Billed', '#93C5FD', 1),
+                        (1, 'Billed', '#FDE047', 2),
+                        (1, 'Pending', '#C4B5FD', 3),
+                        (1, 'Approved', '#86EFAC', 4),
+                        (1, 'Paid', '#22C55E', 5)
+                    ON CONFLICT DO NOTHING
+                ''')
                 # Insert default groups
                 cur.execute('''
                     INSERT INTO facility_groups (id, name, billing_type, billing_day)
