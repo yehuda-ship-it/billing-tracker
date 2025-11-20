@@ -234,36 +234,36 @@ class Database:
                 group['facilities'] = cur.fetchall()
             
             #Get statuses for this facility group
-            cur.execute('''
-                SELECT id, name, color, sort_order
-                FROM billing_statuses
-                WHERE group_id = %s
-                ORDER BY sort_order
-            ''', (group['id'],))
-            group['statuses'] = cur.fetchall()
+                cur.execute('''
+                    SELECT id, name, color, sort_order
+                    FROM billing_statuses
+                    WHERE group_id = %s
+                    ORDER BY sort_order
+                ''', (group['id'],))
+                group['statuses'] = cur.fetchall()
+                    
+                # Get custom dates
+                cur.execute('''
+                    SELECT date, frequency, custom_from, custom_through
+                    FROM custom_dates
+                    WHERE group_id = %s
+                    ORDER BY date DESC
+                ''', (group['id'],))
+                custom_dates = cur.fetchall()
                 
-            # Get custom dates
-            cur.execute('''
-                SELECT date, frequency, custom_from, custom_through
-                FROM custom_dates
-                WHERE group_id = %s
-                ORDER BY date DESC
-            ''', (group['id'],))
-            custom_dates = cur.fetchall()
-            
-            # Convert to format expected by frontend
-            group['customDates'] = []
-            for cd in custom_dates:
-                date_obj = {'date': cd['date'], 'frequency': cd['frequency']}
-                if cd['custom_from']:
-                    date_obj['customFrom'] = cd['custom_from']
-                if cd['custom_through']:
-                    date_obj['customThrough'] = cd['custom_through']
-                group['customDates'].append(date_obj)
-            
-            # Convert snake_case to camelCase for frontend
-            group['billingType'] = group.pop('billing_type')
-            group['billingDay'] = group.pop('billing_day')
+                # Convert to format expected by frontend
+                group['customDates'] = []
+                for cd in custom_dates:
+                    date_obj = {'date': cd['date'], 'frequency': cd['frequency']}
+                    if cd['custom_from']:
+                        date_obj['customFrom'] = cd['custom_from']
+                    if cd['custom_through']:
+                        date_obj['customThrough'] = cd['custom_through']
+                    group['customDates'].append(date_obj)
+                
+                # Convert snake_case to camelCase for frontend
+                group['billingType'] = group.pop('billing_type')
+                group['billingDay'] = group.pop('billing_day')
             
             return groups
     
