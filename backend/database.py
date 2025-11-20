@@ -238,7 +238,7 @@ class Database:
                     SELECT id, name, color, sort_order
                     FROM billing_statuses
                     WHERE group_id = %s
-                    ORDER BY sort_order
+                    ORDER BY id
                 ''', (group['id'],))
                 group['statuses'] = cur.fetchall()
                     
