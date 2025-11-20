@@ -241,6 +241,10 @@ def delete_status(status_id):
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+        
+        
+# API Version: 1.1 - Added group-specific status management
+from flask import Flask, jsonify, request, send_from_directory
 
 # ============================================================================
 # ERROR HANDLERS
