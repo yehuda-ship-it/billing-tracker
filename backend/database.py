@@ -232,6 +232,15 @@ class Database:
                     ORDER BY id
                 ''', (group['id'],))
                 group['facilities'] = cur.fetchall()
+            
+            #Get statuses for this facility group
+            cur.execute('''
+                SELECT id, name, color, sort_order
+                FROM billing_statuses
+                WHERE group_id = %s
+                ORDER BY sort_order
+            ''', (group['id'],))
+            group['statuses'] = cur.fetchall()
                 
                 # Get custom dates
                 cur.execute('''
@@ -525,7 +534,7 @@ class Database:
             cur.execute('''
                 SELECT id, name, color, sort_order
                 FROM billing_statuses
-                WHERE status_group_id = %s
+                WHERE group_id = %s
                 ORDER BY sort_order
             ''', (group_id,))
             statuses = cur.fetchall()
@@ -544,7 +553,7 @@ class Database:
                 VALUES (%s, %s, %s, %s)
                 RETURNING id
             ''', (
-                data['statusGroupId'],
+                data['group_id'],
                 data['name'],
                 data['color'],
                 data.get('sortOrder', 0)
@@ -577,4 +586,4 @@ class Database:
     def __del__(self):
         """Close database connection"""
         if hasattr(self, 'conn'):
-            //self.conn.close()
+            self.conn.close()

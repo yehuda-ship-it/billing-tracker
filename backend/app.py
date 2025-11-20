@@ -204,7 +204,7 @@ def get_statuses():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/statuses/<int:group_id>', methods=['GET'])
+@app.route('/api/billing-statuses/group/<int:group_id>', methods=['GET'])
 def get_statuses_by_group(group_id):
     """Get statuses for a specific group"""
     try:
