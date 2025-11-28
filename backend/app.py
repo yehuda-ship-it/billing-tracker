@@ -1,7 +1,10 @@
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 import os
+from dotenv import load_dotenv 
 from database import Database
+
+load_dotenv()
 
 app = Flask(__name__)
 CORS(app)

@@ -233,26 +233,18 @@ class Database:
                 ''', (group['id'],))
                 group['facilities'] = cur.fetchall()
                 
-            try:
-                cur.execute('''
-                    SELECT id, name, color
-                    FROM billing_statuses
-                    WHERE group_id = %s
-                    ORDER BY id
-                ''', (group['id'],))
-                group['statuses'] = cur.fetchall()
-            except Exception as e:
-                print(f"Error getting statuses for group {group['id']}: {e}")
-                group['statuses'] = []  # Set empty array if error            
-            
-            #Get statuses for this facility group
-                cur.execute('''
-                    SELECT id, name, color, sort_order
-                    FROM billing_statuses
-                    WHERE group_id = %s
-                    ORDER BY id
-                ''', (group['id'],))
-                group['statuses'] = cur.fetchall()
+                # Get statuses for this facility group (ONLY ONCE)
+                try:
+                    cur.execute('''
+                        SELECT id, name, color
+                        FROM billing_statuses
+                        WHERE group_id = %s
+                        ORDER BY id
+                    ''', (group['id'],))
+                    group['statuses'] = cur.fetchall()
+                except Exception as e:
+                    print(f"Error getting statuses for group {group['id']}: {e}")
+                    group['statuses'] = []
                     
                 # Get custom dates
                 cur.execute('''

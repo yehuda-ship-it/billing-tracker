@@ -15,10 +15,15 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
 
-        // API Configuration - automatically uses the same origin
-		//const API_URL = 'http://localhost:3000/api';
-		//const API_URL = 'https://billing-tracker-production.up.railway.app/api';
-        const API_URL = window.location.origin + '/api';
+        // API Configuration
+        // Toggle between these based on your setup:
+        const API_URL = 'http://localhost:5000/api';  // For local development
+        // const API_URL = window.location.origin + '/api'; // For production (Railway)
+        
+        // If you're getting connection errors:
+        // 1. Make sure your backend server is running (python app.py)
+        // 2. Check that it's running on port 5000
+        // 3. If using Railway, uncomment the line above and comment out localhost
 
         // Icons
         const ChevronLeft = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"></polyline></svg>;
@@ -29,22 +34,21 @@
         const X = ({ size = 20 }) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>;
         const Plus = ({ size = 20 }) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>;
         const Trash = ({ size = 18 }) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"></path></svg>;
+        const Cancel = ({ size = 18 }) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>;
 
-
-		// Color palette for status picker
-				const STATUS_COLORS = [
-					{ name: 'Soft Blue', value: '#93C5FD' },
-					{ name: 'Soft Yellow', value: '#FDE047' },
-					{ name: 'Soft Purple', value: '#C4B5FD' },
-					{ name: 'Soft Green', value: '#86EFAC' },
-					{ name: 'Rich Green', value: '#22C55E' },
-					{ name: 'Soft Orange', value: '#FDBA74' },
-					{ name: 'Soft Red', value: '#FCA5A5' },
-					{ name: 'Soft Gray', value: '#D1D5DB' },
-					{ name: 'Soft Teal', value: '#5EEAD4' },
-					{ name: 'Soft Pink', value: '#F9A8D4' }
-				];
-
+        // Color palette for status picker
+        const STATUS_COLORS = [
+            { name: 'Soft Blue', value: '#93C5FD' },
+            { name: 'Soft Yellow', value: '#FDE047' },
+            { name: 'Soft Purple', value: '#C4B5FD' },
+            { name: 'Soft Green', value: '#86EFAC' },
+            { name: 'Rich Green', value: '#22C55E' },
+            { name: 'Soft Orange', value: '#FDBA74' },
+            { name: 'Soft Red', value: '#FCA5A5' },
+            { name: 'Soft Gray', value: '#D1D5DB' },
+            { name: 'Soft Teal', value: '#5EEAD4' },
+            { name: 'Soft Pink', value: '#F9A8D4' }
+        ];
 
         const BillingTracker = () => {
             const [facilityGroups, setFacilityGroups] = useState([]);
@@ -53,10 +57,9 @@
             const [currentCycle, setCurrentCycle] = useState(0);
             const [showSettings, setShowSettings] = useState(false);
             const [editingRecord, setEditingRecord] = useState(null);
+            const [editingData, setEditingData] = useState({});
             const [monthEndUrl, setMonthEndUrl] = useState('');
             const [activeTab, setActiveTab] = useState('billing');
-			const [statusGroups, setStatusGroups] = useState([]);
-			const [allStatuses, setAllStatuses] = useState([]);
             const [loading, setLoading] = useState(true);
             const [error, setError] = useState(null);
 
@@ -73,10 +76,42 @@
                     setLoading(true);
                     setError(null);
 
+                    console.log('Attempting to connect to API at:', API_URL);
+
                     // Load facility groups (includes facilities and custom dates)
-                    const groupsRes = await fetch(`${API_URL}/facility-groups`);
-                    if (!groupsRes.ok) throw new Error('Failed to load facility groups');
+                    const groupsRes = await fetch(`${API_URL}/facility-groups`).catch(err => {
+                        console.error('Network error:', err);
+                        throw new Error(`Cannot connect to API server at ${API_URL}. Make sure the backend server is running on port 5000.`);
+                    });
+                    
+                    if (!groupsRes.ok) {
+                        console.error('Response status:', groupsRes.status);
+                        throw new Error(`Failed to load facility groups (Status: ${groupsRes.status})`);
+                    }
                     const groups = await groupsRes.json();
+                    
+                    // Load billing statuses for each group using the correct endpoint
+                    for (let group of groups) {
+                        try {
+                            const statusesRes = await fetch(`${API_URL}/billing-statuses/group/${group.id}`);
+                            if (statusesRes.ok) {
+                                group.statuses = await statusesRes.json();
+                            } else {
+                                // If that fails, try the alternative endpoint
+                                const altStatusesRes = await fetch(`${API_URL}/statuses`);
+                                if (altStatusesRes.ok) {
+                                    const allStatuses = await altStatusesRes.json();
+                                    // Filter statuses for this group
+                                    group.statuses = allStatuses.filter(s => s.group_id === group.id);
+                                } else {
+                                    group.statuses = [];
+                                }
+                            }
+                        } catch (err) {
+                            console.log(`Could not load statuses for group ${group.id}:`, err);
+                            group.statuses = [];
+                        }
+                    }
                     
                     setFacilityGroups(groups);
                     if (groups.length > 0 && !selectedGroup) {
@@ -92,36 +127,228 @@
                     // Load settings
                     const settingsRes = await fetch(`${API_URL}/settings`);
                     if (!settingsRes.ok) throw new Error('Failed to load settings');
-					const settings = await settingsRes.json();
-					setMonthEndUrl(settings.monthEndUrl || '');
+                    const settings = await settingsRes.json();
+                    setMonthEndUrl(settings.monthEndUrl || '');
 
-					// Load status groups
-					const statusGroupsRes = await fetch(`${API_URL}/status-groups`);
-					if (!statusGroupsRes.ok) throw new Error('Failed to load status groups');
-					const statusGroupsData = await statusGroupsRes.json();
-					setStatusGroups(statusGroupsData);
-
-					// Load all statuses
-					const statusesRes = await fetch(`${API_URL}/statuses`);
-					if (!statusesRes.ok) throw new Error('Failed to load statuses');
-					const statusesData = await statusesRes.json();
-					setAllStatuses(statusesData);
-
-					setLoading(false);
+                    setLoading(false);
                 } catch (err) {
                     console.error('Error loading data:', err);
                     setError(err.message);
                     setLoading(false);
                 }
             };
-			
-			// Get statuses for a specific group
-            const getStatusesForGroup = (groupId) => {
-                const group = facilityGroups.find(g => g.id === groupId);
-                if (!group) return [];
+
+            // Get statuses for current selected group
+            const getCurrentGroupStatuses = () => {
+                const currentGroup = facilityGroups.find(g => g.id === selectedGroup);
+                return currentGroup?.statuses || [];
+            };
+
+            // Get cycle dates based on billing type
+            const getCycleDates = (cycleIndex, billingType, group) => {
+                const today = new Date();
+                let startDate, endDate, billingDate;
                 
-                const statusGroupId = group.statusGroupId || 1; // Default to group 1
-                return allStatuses.filter(s => s.statusGroupId === statusGroupId);
+                if (!billingType || billingType === 'monthly') {
+                    const billingDay = group?.billingDate || 1;
+                    const targetMonth = new Date(today.getFullYear(), today.getMonth() + cycleIndex, 1);
+                    
+                    billingDate = new Date(targetMonth.getFullYear(), targetMonth.getMonth(), billingDay);
+                    startDate = new Date(targetMonth.getFullYear(), targetMonth.getMonth(), 1);
+                    endDate = new Date(targetMonth.getFullYear(), targetMonth.getMonth() + 1, 0); // Last day of month
+                } else if (billingType === 'weekly') {
+                    const weekOffset = cycleIndex * 7;
+                    const targetDate = new Date(today.getTime() + (weekOffset * 24 * 60 * 60 * 1000));
+                    
+                    // Get start of week
+                    const dayOfWeek = targetDate.getDay();
+                    const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+                    startDate = new Date(targetDate.getTime() + (daysToMonday * 24 * 60 * 60 * 1000));
+                    
+                    // End of week (Sunday)
+                    endDate = new Date(startDate.getTime() + (6 * 24 * 60 * 60 * 1000));
+                    
+                    // Billing date based on selected day
+                    const dayMapping = {
+                        'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 
+                        'Friday': 5, 'Saturday': 6, 'Sunday': 0
+                    };
+                    const billingDayNum = dayMapping[group?.billingDay] || 1;
+                    const daysToAdd = billingDayNum === 0 ? 6 : billingDayNum - 1;
+                    billingDate = new Date(startDate.getTime() + (daysToAdd * 24 * 60 * 60 * 1000));
+                } else if (billingType === 'biweekly') {
+                    const weekOffset = cycleIndex * 14;
+                    const targetDate = new Date(today.getTime() + (weekOffset * 24 * 60 * 60 * 1000));
+                    
+                    // Get start of 2-week period
+                    const dayOfWeek = targetDate.getDay();
+                    const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+                    startDate = new Date(targetDate.getTime() + (daysToMonday * 24 * 60 * 60 * 1000));
+                    
+                    // End of 2-week period
+                    endDate = new Date(startDate.getTime() + (13 * 24 * 60 * 60 * 1000));
+                    billingDate = new Date(startDate.getTime() + (7 * 24 * 60 * 60 * 1000)); // Middle of period
+                } else if (billingType === 'bimonthly') {
+                    const monthOffset = cycleIndex * 2;
+                    const targetMonth = new Date(today.getFullYear(), today.getMonth() + monthOffset, 1);
+                    
+                    startDate = new Date(targetMonth.getFullYear(), targetMonth.getMonth(), 1);
+                    endDate = new Date(targetMonth.getFullYear(), targetMonth.getMonth() + 2, 0); // Last day of second month
+                    billingDate = new Date(targetMonth.getFullYear(), targetMonth.getMonth() + 1, 1); // First of second month
+                } else {
+                    // Default to monthly if unknown type
+                    const billingDay = group?.billingDate || 1;
+                    const targetMonth = new Date(today.getFullYear(), today.getMonth() + cycleIndex, 1);
+                    
+                    billingDate = new Date(targetMonth.getFullYear(), targetMonth.getMonth(), billingDay);
+                    startDate = new Date(targetMonth.getFullYear(), targetMonth.getMonth(), 1);
+                    endDate = new Date(targetMonth.getFullYear(), targetMonth.getMonth() + 1, 0);
+                }
+                
+                return {
+                    billingDate: formatDateForStorage(billingDate.toISOString().split('T')[0]),
+                    fromDate: formatDateForStorage(startDate.toISOString().split('T')[0]),
+                    throughDate: formatDateForStorage(endDate.toISOString().split('T')[0])
+                };
+            };
+
+            // Format date from YYYY-MM-DD to MMDDYYYY for storage
+            const formatDateForStorage = (dateStr) => {
+                if (!dateStr) return '';
+                const [year, month, day] = dateStr.split('-');
+                return `${month.padStart(2, '0')}${day.padStart(2, '0')}${year}`;
+            };
+
+            // Format date from MMDDYYYY to YYYY-MM-DD for date input
+            const formatDateForInput = (dateStr) => {
+                if (!dateStr || dateStr.length !== 8) return '';
+                const month = dateStr.substring(0, 2);
+                const day = dateStr.substring(2, 4);
+                const year = dateStr.substring(4, 8);
+                return `${year}-${month}-${day}`;
+            };
+
+            // Display date in MM/DD/YYYY format
+            const displayDate = (dateStr) => {
+                if (!dateStr || dateStr.length !== 8) return '';
+                return `${dateStr.substring(0, 2)}/${dateStr.substring(2, 4)}/${dateStr.substring(4, 8)}`;
+            };
+
+            // Generate billing cycles based on billing type
+            const generateCycles = () => {
+                const cycles = [];
+                const group = facilityGroups.find(g => g.id === selectedGroup);
+                if (!group) return cycles;
+                
+                const billingType = group.billingType || 'monthly';
+                const today = new Date();
+                
+                for (let i = -MAX_PAST_CYCLES; i <= MAX_FUTURE_CYCLES; i++) {
+                    cycles.push({
+                        index: i,
+                        label: getCycleLabel(i),
+                        dates: getCycleDates(i, billingType, group),
+                        billingType: billingType
+                    });
+                }
+                
+                return cycles;
+            };
+            
+            // Get label for cycle based on position
+            const getCycleLabel = (cycleIndex) => {
+                if (cycleIndex === 0) return 'Current Cycle';
+                if (cycleIndex < 0) return `${Math.abs(cycleIndex)} ${Math.abs(cycleIndex) === 1 ? 'Cycle' : 'Cycles'} Ago`;
+                return `${cycleIndex} ${cycleIndex === 1 ? 'Cycle' : 'Cycles'} Ahead`;
+            };
+
+            const cycles = generateCycles();
+
+            // Get facilities for the selected group
+            const getCurrentFacilities = () => {
+                const group = facilityGroups.find(g => g.id === selectedGroup);
+                return group ? group.facilities : [];
+            };
+
+            // Start editing a record
+            const handleEditStart = (key) => {
+                setEditingRecord(key);
+                
+                // Parse the key to get facility and cycle info
+                const [facilityId, cycleStr] = key.split('-');
+                const cycleIndex = parseInt(cycleStr);
+                
+                // Get the current group and calculate dates
+                const currentGroup = facilityGroups.find(g => g.id === selectedGroup);
+                const calculatedDates = getCycleDates(cycleIndex, currentGroup?.billingType || 'monthly', currentGroup);
+                
+                // Get existing record or empty object
+                const existingRecord = billingRecords[key] || {};
+                
+                // If dates don't exist in the record, save them when editing starts
+                if (!existingRecord.billingDate || !existingRecord.fromDate || !existingRecord.throughDate) {
+                    const newRecord = {
+                        ...existingRecord,
+                        billingDate: existingRecord.billingDate || calculatedDates.billingDate,
+                        fromDate: existingRecord.fromDate || calculatedDates.fromDate,
+                        throughDate: existingRecord.throughDate || calculatedDates.throughDate
+                    };
+                    
+                    // Update the billing records with the calculated dates
+                    setBillingRecords(prev => ({
+                        ...prev,
+                        [key]: newRecord
+                    }));
+                }
+            };
+
+            // Update field during editing
+            const handleFieldUpdate = (key, field, value) => {
+                setBillingRecords(prev => ({
+                    ...prev,
+                    [key]: {
+                        ...prev[key],
+                        [field]: value
+                    }
+                }));
+            };
+
+            // Save record to API
+            const saveRecordToAPI = async (key) => {
+                const record = billingRecords[key];
+                const [facilityId, cycleStr] = key.split('-');
+                const cycle = parseInt(cycleStr);
+                
+                try {
+                    const dataToSave = {
+                        ...record,
+                        facilityId: parseInt(facilityId),
+                        cycle: cycle
+                    };
+
+                    const response = await fetch(`${API_URL}/billing-records`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(dataToSave)
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error('Failed to save record');
+                    }
+                    
+                    setEditingRecord(null);
+                    setEditingData({});
+                } catch (err) {
+                    console.error('Error saving record:', err);
+                    alert('Failed to save record. Please try again.');
+                }
+            };
+
+            // Cancel editing
+            const handleCancelEdit = () => {
+                setEditingRecord(null);
+                setEditingData({});
+                loadAllData(); // Reload to restore original values
             };
 
             // Status Badge Component
@@ -130,1253 +357,1146 @@
                 
                 return (
                     <span 
-                        className="px-3 py-1 rounded-full text-sm font-semibold"
-                        style={{ 
-                            backgroundColor: status.color + '40', 
-                            color: status.color
-                        }}
+                        className="px-3 py-1 rounded-full text-xs font-bold text-black border-2 border-gray-300"
+                        style={{ backgroundColor: status.color }}
                     >
                         {status.name}
                     </span>
                 );
             };
 
-            // Save billing record to API
-            const handleSaveRecord = async (key, updates) => {
-                const updatedRecord = { ...billingRecords[key], ...updates };
-                
-                // Update local state immediately
-                setBillingRecords(prev => ({
-                    ...prev,
-                    [key]: updatedRecord
-                }));
-                setEditingRecord(null);
-
-                // Save to API
-                try {
-                    const response = await fetch(`${API_URL}/billing-records`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(updatedRecord)
-                    });
-                    
-                    if (!response.ok) {
-                        throw new Error('Failed to save record');
-                    }
-                } catch (err) {
-                    console.error('Error saving record:', err);
-                    alert('Failed to save record. Please try again.');
-                }
-            };
-
-            // Same date generation logic as before
-            const generateBillingDates = (billingType, billingDay, customDates, cycleOffset = 0) => {
-                const today = new Date();
-                let billingDate, fromDate, throughDate;
-
-                if (billingType === 'custom' && customDates && customDates.length > 0) {
-                    const sortedDates = [...customDates].sort((a, b) => new Date(b.date) - new Date(a.date));
-                    const targetDateObj = sortedDates[cycleOffset >= 0 ? cycleOffset : Math.abs(cycleOffset)];
-                    if (targetDateObj) {
-                        billingDate = new Date(targetDateObj.date);
-                        const frequency = targetDateObj.frequency || 'monthly';
-                        
-                        if (frequency === 'custom_range' && targetDateObj.customFrom && targetDateObj.customThrough) {
-                            fromDate = new Date(targetDateObj.customFrom);
-                            throughDate = new Date(targetDateObj.customThrough);
-                        } else {
-                            fromDate = new Date(billingDate);
-                            if (frequency === 'weekly') {
-                                fromDate.setDate(billingDate.getDate() - 7);
-                            } else if (frequency === 'biweekly') {
-                                fromDate.setDate(billingDate.getDate() - 14);
-                            } else if (frequency === 'bimonthly') {
-                                fromDate.setDate(billingDate.getDate() - 15);
-                            } else if (frequency === 'monthly') {
-                                fromDate.setMonth(billingDate.getMonth() - 1);
-                            }
-                            
-                            throughDate = new Date(billingDate);
-                            throughDate.setDate(billingDate.getDate() - 1);
-                        }
-                    } else {
-                        return { billingDate: '', fromDate: '', throughDate: '' };
-                    }
-                } else if (billingType === 'custom' && (!customDates || customDates.length === 0)) {
-                    return { billingDate: '', fromDate: '', throughDate: '' };
-                } else if (billingType === 'weekly') {
-                    const dayOfWeek = today.getDay();
-                    const daysToSubtract = (dayOfWeek - billingDay + 7) % 7;
-                    billingDate = new Date(today);
-                    billingDate.setDate(today.getDate() - daysToSubtract - (cycleOffset * 7));
-                    
-                    fromDate = new Date(billingDate);
-                    fromDate.setDate(billingDate.getDate() - 7);
-                    
-                    throughDate = new Date(billingDate);
-                    throughDate.setDate(billingDate.getDate() - 1);
-                } else if (billingType === 'biweekly') {
-                    const dayOfWeek = today.getDay();
-                    const daysToSubtract = (dayOfWeek - billingDay + 7) % 7;
-                    billingDate = new Date(today);
-                    billingDate.setDate(today.getDate() - daysToSubtract - (cycleOffset * 14));
-                    
-                    fromDate = new Date(billingDate);
-                    fromDate.setDate(billingDate.getDate() - 14);
-                    
-                    throughDate = new Date(billingDate);
-                    throughDate.setDate(billingDate.getDate() - 1);
-                } else if (billingType === 'bimonthly') {
-                    const currentDay = today.getDate();
-                    const currentMonth = today.getMonth();
-                    const currentYear = today.getFullYear();
-                    
-                    let billingDates = [];
-                    for (let i = 0; i < 24; i++) {
-                        const month = currentMonth - Math.floor(i / 2);
-                        const year = currentYear + Math.floor(month / 12);
-                        const adjustedMonth = ((month % 12) + 12) % 12;
-                        
-                        if (i % 2 === 0) {
-                            billingDates.push(new Date(year, adjustedMonth, 16));
-                        } else {
-                            billingDates.push(new Date(year, adjustedMonth, 1));
-                        }
-                    }
-                    
-                    billingDates.sort((a, b) => b - a);
-                    billingDate = billingDates[cycleOffset];
-                    
-                    fromDate = billingDates[cycleOffset + 1] || new Date(billingDate.getFullYear(), billingDate.getMonth() - 1, 16);
-                    
-                    throughDate = new Date(billingDate);
-                    throughDate.setDate(billingDate.getDate() - 1);
-                } else if (billingType === 'monthly') {
-                    billingDate = new Date(today.getFullYear(), today.getMonth() - cycleOffset, billingDay);
-                    
-                    fromDate = new Date(billingDate);
-                    fromDate.setMonth(billingDate.getMonth() - 1);
-                    
-                    throughDate = new Date(billingDate);
-                    throughDate.setDate(billingDate.getDate() - 1);
-                }
-
-                return {
-                    billingDate: formatDate(billingDate),
-                    fromDate: formatDate(fromDate),
-                    throughDate: formatDate(throughDate)
-                };
-            };
-
-            const formatDate = (date) => {
-                const month = String(date.getMonth() + 1).padStart(2, '0');
-                const day = String(date.getDate()).padStart(2, '0');
-                const year = date.getFullYear();
-                return `${month}${day}${year}`;
-            };
-
-            const displayDate = (dateStr) => {
-                if (!dateStr || dateStr.length !== 8) return '';
-                return `${dateStr.slice(0,2)}/${dateStr.slice(2,4)}/${dateStr.slice(4)}`;
-            };
-
-            // Initialize billing records when group changes
-            useEffect(() => {
-                const selectedGroupData = facilityGroups.find(g => g.id === selectedGroup);
-                if (selectedGroupData) {
-                    initializeBillingRecords(selectedGroupData);
-                }
-            }, [selectedGroup, facilityGroups]);
-
-            const initializeBillingRecords = (group) => {
-                const records = {};
-                
-                const maxCyclesToCreate = group.billingType === 'custom' 
-                    ? Math.min(MAX_PAST_CYCLES, (group.customDates || []).length)
-                    : MAX_PAST_CYCLES;
-                
-                group.facilities.forEach(facility => {
-                    for (let cycle = 0; cycle <= maxCyclesToCreate; cycle++) {
-                        const dates = generateBillingDates(group.billingType, group.billingDay, group.customDates, cycle);
-                        const key = `${facility.id}-${cycle}`;
-                        
-                        if (dates.billingDate) {
-                            if (!billingRecords[key]) {
-                                records[key] = {
-                                    facilityId: facility.id,
-                                    facilityName: facility.name,
-                                    cycle: cycle,
-                                    ...dates,
-                                    paidAmount: '',
-                                    paidDate: '',
-									statusId: null
-                                };
-                            }
-                        }
-                    }
-                    
-                    if (group.billingType !== 'custom') {
-                        for (let cycle = -1; cycle >= -MAX_FUTURE_CYCLES; cycle--) {
-                            const dates = generateBillingDates(group.billingType, group.billingDay, group.customDates, cycle);
-                            const key = `${facility.id}-${cycle}`;
-                            if (!billingRecords[key]) {
-                                records[key] = {
-                                    facilityId: facility.id,
-                                    facilityName: facility.name,
-                                    cycle: cycle,
-                                    ...dates,
-                                    paidAmount: '',
-                                    paidDate: '',
-									statusId: null
-                                };
-                            }
-                        }
-                    }
-                });
-                
-                setBillingRecords(prev => ({ ...prev, ...records }));
-            };
-
-            const deleteGroup = async (groupId) => {
-                if (facilityGroups.length <= 1) {
-                    alert('Cannot delete the last group');
-                    return;
-                }
-                
-                if (!window.confirm('Are you sure you want to delete this group? This cannot be undone.')) {
-                    return;
-                }
-
-                try {
-                    const response = await fetch(`${API_URL}/facility-groups/${groupId}`, {
-                        method: 'DELETE'
-                    });
-
-                    if (!response.ok) {
-                        throw new Error('Failed to delete group');
-                    }
-
-                    // Remove from local state
-                    setFacilityGroups(prev => prev.filter(g => g.id !== groupId));
-                    
-                    if (selectedGroup === groupId) {
-                        const remainingGroups = facilityGroups.filter(g => g.id !== groupId);
-                        if (remainingGroups.length > 0) {
-                            setSelectedGroup(remainingGroups[0].id);
-                        }
-                    }
-                } catch (err) {
-                    console.error('Error deleting group:', err);
-                    alert('Failed to delete group. Please try again.');
-                }
-            };
-
-            // Settings Panel Component
-            const SettingsPanel = () => {
-                const [editingGroup, setEditingGroup] = useState(null);
-                const [editingFacility, setEditingFacility] = useState(null);
-                const [newGroupName, setNewGroupName] = useState('');
-                const [selectedBillingType, setSelectedBillingType] = useState('monthly');
-                const [selectedBillingDay, setSelectedBillingDay] = useState(1);
-                const [newFacilityName, setNewFacilityName] = useState('');
-                const [editingMonthEndUrl, setEditingMonthEndUrl] = useState(false);
-                const [tempMonthEndUrl, setTempMonthEndUrl] = useState(monthEndUrl);
-                const [settingsTab, setSettingsTab] = useState('groups');
+            // Group Status Manager Component - Simplified version that stores with group
+            const GroupStatusManager = ({ group }) => {
+                const [showAddStatus, setShowAddStatus] = useState(false);
+                const [newStatus, setNewStatus] = useState({ name: '', color: '#93C5FD' });
                 const [editingStatus, setEditingStatus] = useState(null);
-                const [newStatusName, setNewStatusName] = useState('');
-                const [newStatusColor, setNewStatusColor] = useState('#93C5FD');
-                const [addingToGroup, setAddingToGroup] = useState(null);
-                const [expandedCustomDates, setExpandedCustomDates] = useState({});
-                const [newCustomDate, setNewCustomDate] = useState('');
-                const [newCustomFrequency, setNewCustomFrequency] = useState('monthly');
-                const [newCustomFrom, setNewCustomFrom] = useState('');
-                const [newCustomThrough, setNewCustomThrough] = useState('');
+                const [localStatuses, setLocalStatuses] = useState(group.statuses || []);
 
-                const defaultGroup = statusGroups.find(g => g.isDefault) || statusGroups[0];
-                const defaultStatuses = defaultGroup?.statuses || [];
-				
-				// Status management functions
-				const handleAddStatus = async () => {
-					if (!newStatusName.trim()) return;
-					
-					try {
-						const response = await fetch(`${API_URL}/statuses`, {
-							method: 'POST',
-							headers: { 'Content-Type': 'application/json' },
-							body: JSON.stringify({
-								statusGroupId: defaultGroup.id,
-								name: newStatusName,
-								color: newStatusColor,
-								sortOrder: defaultStatuses.length + 1
-							})
-						});
-						if (!response.ok) throw new Error('Failed to add status');
-        
-						setNewStatusName('');
-						setNewStatusColor('#93C5FD');
-						await loadAllData();
-					} catch (err) {
-						console.error('Error adding status:', err);
-						alert('Failed to add status');
-					}
-				};
+                // Update local statuses when group statuses change
+                useEffect(() => {
+                    setLocalStatuses(group.statuses || []);
+                }, [group.statuses]);
+
+                const handleAddStatus = async () => {
+                    if (!newStatus.name.trim()) {
+                        alert('Please enter a status name');
+                        return;
+                    }
+
+                    const requestBody = {
+                        name: newStatus.name.trim(),
+                        color: newStatus.color,
+                        group_id: group.id  // or might need to be groupId
+                    };
+
+                    console.log('=== ADDING STATUS ===');
+                    console.log('Group ID:', group.id);
+                    console.log('Request URL:', `${API_URL}/statuses`);
+                    console.log('Request body:', requestBody);
+
+                    try {
+                        const response = await fetch(`${API_URL}/statuses`, {  // Changed from /billing-statuses to /statuses
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(requestBody)
+                        });
+
+                        console.log('Response status:', response.status);
+                        const responseText = await response.text();
+                        console.log('Response text:', responseText);
+
+                        if (response.ok) {
+                            try {
+                                const result = JSON.parse(responseText);
+                                console.log('Status added successfully:', result);
+                                
+                                // Create the full status object
+                                const addedStatus = {
+                                    id: result.id,
+                                    name: newStatus.name.trim(),
+                                    color: newStatus.color,
+                                    group_id: group.id
+                                };
+                                
+                                // Update local state immediately
+                                setLocalStatuses([...localStatuses, addedStatus]);
+                                
+                                // Reset form
+                                setShowAddStatus(false);
+                                setNewStatus({ name: '', color: '#93C5FD' });
+                                
+                                // Reload all data to sync
+                                await loadAllData();
+                            } catch (parseError) {
+                                console.error('Failed to parse response:', parseError);
+                                await loadAllData();
+                            }
+                        } else {
+                            console.error('Failed to add status. Response:', responseText);
+                            try {
+                                const errorData = JSON.parse(responseText);
+                                alert(`Failed to add status:\n${errorData.error || responseText}`);
+                            } catch {
+                                alert(`Failed to add status:\n${responseText}`);
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Network error adding status:', error);
+                        alert('Network error: ' + error.message);
+                    }
+                };
 
                 const handleUpdateStatus = async (statusId, updates) => {
+                    console.log('Updating status:', statusId, 'with:', updates);
+                    
                     try {
-                        const response = await fetch(`${API_URL}/statuses/${statusId}`, {
+                        const response = await fetch(`${API_URL}/statuses/${statusId}`, {  // Changed to /statuses
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(updates)
                         });
-                        if (!response.ok) throw new Error('Failed to update status');
-                        
-                        setEditingStatus(null);
-                        await loadAllData();
-                    } catch (err) {
-                        console.error('Error updating status:', err);
-                        alert('Failed to update status');
+
+                        if (response.ok) {
+                            console.log('Status updated successfully');
+                            await loadAllData();
+                            setEditingStatus(null);
+                        } else {
+                            const error = await response.text();
+                            console.error('Failed to update status:', error);
+                            alert('Failed to update status: ' + error);
+                        }
+                    } catch (error) {
+                        console.error('Error updating status:', error);
+                        alert('Failed to update status: ' + error.message);
                     }
                 };
 
                 const handleDeleteStatus = async (statusId) => {
-                    if (!window.confirm('Are you sure you want to delete this status?')) return;
-                    
+                    if (!confirm('Delete this status? This will remove it from all billing records.')) return;
+
+                    console.log('=== DELETING STATUS ===');
+                    console.log('Status ID:', statusId);
+                    console.log('Request URL:', `${API_URL}/statuses/${statusId}`);
+
                     try {
-                        const response = await fetch(`${API_URL}/statuses/${statusId}`, {
-                            method: 'DELETE'
-                        });
-                        if (!response.ok) throw new Error('Failed to delete status');
-                        
-                        await loadAllData();
-                    } catch (err) {
-                        console.error('Error deleting status:', err);
-                        alert('Failed to delete status');
-                    }
-                };
-
-                const toggleCustomDates = (groupId) => {
-                    setExpandedCustomDates(prev => ({
-                        ...prev,
-                        [groupId]: !prev[groupId]
-                    }));
-                };
-
-                const addFacility = async (groupId) => {
-                    if (!newFacilityName.trim()) return;
-                    
-                    try {
-                        const response = await fetch(`${API_URL}/facilities`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                name: newFacilityName,
-                                groupId: groupId
-                            })
-                        });
-
-                        if (!response.ok) {
-                            throw new Error('Failed to add facility');
-                        }
-
-                        const result = await response.json();
-                        
-                        setFacilityGroups(prev => prev.map(g => {
-                            if (g.id === groupId) {
-                                return {
-                                    ...g,
-                                    facilities: [...g.facilities, { id: result.id, name: newFacilityName }]
-                                };
-                            }
-                            return g;
-                        }));
-                        
-                        setNewFacilityName('');
-                        setAddingToGroup(null);
-                    } catch (err) {
-                        console.error('Error adding facility:', err);
-                        alert('Failed to add facility. Please try again.');
-                    }
-                };
-
-                const removeFacility = async (groupId, facilityId) => {
-                    try {
-                        const response = await fetch(`${API_URL}/facilities/${facilityId}`, {
+                        const response = await fetch(`${API_URL}/statuses/${statusId}`, {  // Changed to /statuses
                             method: 'DELETE'
                         });
 
-                        if (!response.ok) {
-                            throw new Error('Failed to remove facility');
-                        }
-
-                        setFacilityGroups(prev => prev.map(g => {
-                            if (g.id === groupId) {
-                                return {
-                                    ...g,
-                                    facilities: g.facilities.filter(f => f.id !== facilityId)
-                                };
-                            }
-                            return g;
-                        }));
-                    } catch (err) {
-                        console.error('Error removing facility:', err);
-                        alert('Failed to remove facility. Please try again.');
-                    }
-                };
-
-                const saveGroupChanges = async (groupId, updates) => {
-                    try {
-                        const group = facilityGroups.find(g => g.id === groupId);
-                        const response = await fetch(`${API_URL}/facility-groups/${groupId}`, {
-                            method: 'PUT',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                ...group,
-                                ...updates
-                            })
-                        });
-
-                        if (!response.ok) {
-                            throw new Error('Failed to update group');
-                        }
-
-                        setFacilityGroups(prev => prev.map(g => 
-                            g.id === groupId ? { ...g, ...updates } : g
-                        ));
-                    } catch (err) {
-                        console.error('Error updating group:', err);
-                        alert('Failed to update group. Please try again.');
-                    }
-                };
-
-                const addCustomDate = async (groupId) => {
-                    if (!newCustomDate) return;
-                    
-                    const newDateObj = { 
-                        date: newCustomDate, 
-                        frequency: newCustomFrequency 
-                    };
-                    
-                    if (newCustomFrequency === 'custom_range') {
-                        if (!newCustomFrom || !newCustomThrough) {
-                            alert('Please specify both From and Through dates for custom range');
-                            return;
-                        }
-                        newDateObj.customFrom = newCustomFrom;
-                        newDateObj.customThrough = newCustomThrough;
-                    }
-                    
-                    const group = facilityGroups.find(g => g.id === groupId);
-                    const updatedDates = [...(group.customDates || []), newDateObj].sort((a, b) => new Date(b.date) - new Date(a.date));
-
-                    try {
-                        const response = await fetch(`${API_URL}/custom-dates`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                groupId: groupId,
-                                customDates: updatedDates
-                            })
-                        });
-
-                        if (!response.ok) {
-                            throw new Error('Failed to save custom dates');
-                        }
-
-                        setFacilityGroups(prev => prev.map(g => {
-                            if (g.id === groupId) {
-                                return { ...g, customDates: updatedDates };
-                            }
-                            return g;
-                        }));
+                        console.log('Response status:', response.status);
                         
-                        setNewCustomDate('');
-                        setNewCustomFrequency('monthly');
-                        setNewCustomFrom('');
-                        setNewCustomThrough('');
-                    } catch (err) {
-                        console.error('Error saving custom date:', err);
-                        alert('Failed to save custom date. Please try again.');
-                    }
-                };
-
-                const removeCustomDate = async (groupId, dateToRemove) => {
-                    const group = facilityGroups.find(g => g.id === groupId);
-                    const updatedDates = group.customDates.filter(d => d.date !== dateToRemove);
-
-                    try {
-                        const response = await fetch(`${API_URL}/custom-dates`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                groupId: groupId,
-                                customDates: updatedDates
-                            })
-                        });
-
-                        if (!response.ok) {
-                            throw new Error('Failed to update custom dates');
+                        if (response.ok) {
+                            console.log('Status deleted successfully');
+                            
+                            // Update local state immediately
+                            setLocalStatuses(localStatuses.filter(s => s.id !== statusId));
+                            
+                            // Reload all data to sync
+                            await loadAllData();
+                        } else {
+                            const responseText = await response.text();
+                            console.error('Failed to delete status. Response:', responseText);
+                            alert(`Failed to delete status:\n${responseText}`);
                         }
-
-                        setFacilityGroups(prev => prev.map(g => {
-                            if (g.id === groupId) {
-                                return { ...g, customDates: updatedDates };
-                            }
-                            return g;
-                        }));
-                    } catch (err) {
-                        console.error('Error removing custom date:', err);
-                        alert('Failed to remove custom date. Please try again.');
-                    }
-                };
-
-                const saveMonthEndUrl = async () => {
-                    try {
-                        const response = await fetch(`${API_URL}/settings`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ monthEndUrl })
-                        });
-
-                        if (!response.ok) {
-                            throw new Error('Failed to save settings');
-                        }
-                    } catch (err) {
-                        console.error('Error saving settings:', err);
-                    }
-                };
-
-                const getFrequencyLabel = (freq) => {
-                    switch(freq) {
-                        case 'weekly': return 'Weekly (7 days)';
-                        case 'biweekly': return 'Bi-Weekly (14 days)';
-                        case 'bimonthly': return 'Bi-Monthly (15 days)';
-                        case 'monthly': return 'Monthly';
-                        case 'custom_range': return 'Custom Range';
-                        default: return freq;
+                    } catch (error) {
+                        console.error('Network error deleting status:', error);
+                        alert('Network error: ' + error.message);
                     }
                 };
 
                 return (
-                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                        <div className="bg-gray-100 rounded-lg p-6 max-w-5xl w-full max-h-[85vh] overflow-y-auto">
-                            <div className="flex justify-between items-center mb-6">
-								<h2 className="text-2xl font-bold text-black">Settings</h2>
-								<button onClick={() => { setShowSettings(false); saveMonthEndUrl(); }} className="p-2 hover:bg-gray-200 rounded">
-									<X />
-								</button>
-							</div>
-
-							<div className="flex border-b-2 border-gray-300 mb-6">
-								<button
-									onClick={() => setSettingsTab('groups')}
-									className={`flex-1 px-4 py-3 font-semibold ${
-										settingsTab === 'groups'
-											? 'bg-white text-blue-600 border-b-4 border-blue-600'
-											: 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-									}`}
-								>
-									Facility Groups
-								</button>
-								<button
-									onClick={() => setSettingsTab('statuses')}
-									className={`flex-1 px-4 py-3 font-semibold ${
-										settingsTab === 'statuses'
-											? 'bg-white text-blue-600 border-b-4 border-blue-600'
-											: 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-									}`}
-								>
-									Billing Statuses
-								</button>
-								<button
-									onClick={() => setSettingsTab('monthend')}
-									className={`flex-1 px-4 py-3 font-semibold ${
-										settingsTab === 'monthend'
-											? 'bg-white text-blue-600 border-b-4 border-blue-600'
-											: 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-									}`}
-								>
-									Month End URL
-								</button>
-							</div>
-							
-{settingsTab === 'monthend' && (
-                            <div className="mb-6 bg-white border-2 border-gray-300 rounded-lg p-5">
-                                <h3 className="text-lg font-bold text-black mb-3">Month End Tracker</h3>
-                                <div className="flex items-center gap-2">
-                                    <span className="font-semibold text-black min-w-[100px]">URL:</span>
-                                    <input
-                                        type="text"
-                                        value={monthEndUrl}
-                                        onChange={(e) => setMonthEndUrl(e.target.value)}
-                                        placeholder="https://example.com/month-end"
-                                        className="border-2 border-gray-300 rounded px-3 py-2 flex-1 text-black font-medium"
-                                    />
-                                </div>
-                            </div>
-)}
-{settingsTab === 'groups' && (
-                            <div className="space-y-4">
-                                {facilityGroups.map(group => (
-                                    <div key={group.id} className="bg-white border-2 border-gray-300 rounded-lg p-5">
-                                        <div className="flex justify-between items-start mb-4">
+                    <div className="border-t pt-3">
+                        <h4 className="font-semibold text-sm text-gray-700 mb-2">Billing Statuses</h4>
+                        <div className="space-y-2">
+                            {localStatuses.map(status => (
+                                <div key={status.id} className="flex items-center gap-2">
+                                    {editingStatus === status.id ? (
+                                        <>
                                             <input
                                                 type="text"
-                                                defaultValue={group.name}
-                                                onBlur={(e) => saveGroupChanges(group.id, { name: e.target.value })}
-                                                className="text-lg font-bold text-black bg-transparent border-b-2 border-gray-300 focus:border-blue-500 outline-none px-1"
+                                                value={status.name}
+                                                onChange={(e) => {
+                                                    const updated = localStatuses.map(s => 
+                                                        s.id === status.id ? {...s, name: e.target.value} : s
+                                                    );
+                                                    setLocalStatuses(updated);
+                                                }}
+                                                className="flex-1 px-2 py-1 border rounded text-sm"
                                             />
-                                            <button
-                                                onClick={() => deleteGroup(group.id)}
-                                                className="text-red-600 hover:text-red-800 p-2 hover:bg-red-50 rounded"
-                                                title="Delete Group"
+                                            <select
+                                                value={status.color}
+                                                onChange={(e) => {
+                                                    const updated = localStatuses.map(s => 
+                                                        s.id === status.id ? {...s, color: e.target.value} : s
+                                                    );
+                                                    setLocalStatuses(updated);
+                                                }}
+                                                className="px-2 py-1 border rounded text-sm"
+                                                style={{ backgroundColor: status.color }}
                                             >
-                                                <Trash size={20} />
+                                                {STATUS_COLORS.map(color => (
+                                                    <option key={color.value} value={color.value} style={{ backgroundColor: color.value }}>
+                                                        {color.name}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            <button
+                                                onClick={() => {
+                                                    const statusToUpdate = localStatuses.find(s => s.id === status.id);
+                                                    handleUpdateStatus(status.id, { 
+                                                        name: statusToUpdate.name, 
+                                                        color: statusToUpdate.color 
+                                                    });
+                                                }}
+                                                className="text-green-600 hover:text-green-800"
+                                                title="Save"
+                                            >
+                                                <Save size={16} />
                                             </button>
-                                        </div>
-
-                                        <div className="space-y-3 text-sm">
-                                            <div className="flex items-center gap-2">
-                                                <span className="font-semibold text-black min-w-[100px]">Billing Type:</span>
-                                                <select 
-                                                    value={group.billingType}
-                                                    onChange={(e) => saveGroupChanges(group.id, { billingType: e.target.value })}
-                                                    className="border-2 border-gray-300 rounded px-3 py-1 font-medium text-black"
-                                                >
-                                                    <option value="weekly">Weekly</option>
-                                                    <option value="biweekly">Bi-Weekly (Every 2 Weeks)</option>
-                                                    <option value="bimonthly">Bi-Monthly (1st & 16th)</option>
-                                                    <option value="monthly">Monthly</option>
-                                                    <option value="custom">Custom Schedule</option>
-                                                </select>
-                                            </div>
-                                            
-                                            {(group.billingType === 'weekly' || group.billingType === 'biweekly') && (
-                                                <div className="flex items-center gap-2">
-                                                    <span className="font-semibold text-black min-w-[100px]">Billing Day:</span>
-                                                    <select
-                                                        value={group.billingDay}
-                                                        onChange={(e) => saveGroupChanges(group.id, { billingDay: parseInt(e.target.value) })}
-                                                        className="border-2 border-gray-300 rounded px-3 py-1 font-medium text-black"
-                                                    >
-                                                        <option value="0">Sunday</option>
-                                                        <option value="1">Monday</option>
-                                                        <option value="2">Tuesday</option>
-                                                        <option value="3">Wednesday</option>
-                                                        <option value="4">Thursday</option>
-                                                        <option value="5">Friday</option>
-                                                        <option value="6">Saturday</option>
-                                                    </select>
-                                                </div>
-                                            )}
-
-                                            {group.billingType === 'monthly' && (
-                                                <div className="flex items-center gap-2">
-                                                    <span className="font-semibold text-black min-w-[100px]">Billing Date:</span>
-                                                    <input
-                                                        type="number"
-                                                        min="1"
-                                                        max="28"
-                                                        value={group.billingDay}
-                                                        onChange={(e) => saveGroupChanges(group.id, { billingDay: parseInt(e.target.value) })}
-                                                        className="border-2 border-gray-300 rounded px-3 py-1 w-20 font-medium text-black"
-                                                    />
-                                                </div>
-                                            )}
-
-                                            {group.billingType === 'custom' && (
-                                                <div>
-                                                    <div className="flex items-center justify-between mb-2">
-                                                        <span className="font-semibold text-black">Custom Billing Schedule:</span>
-                                                        <button
-                                                            onClick={() => toggleCustomDates(group.id)}
-                                                            className="text-blue-600 hover:text-blue-800 font-semibold text-sm flex items-center gap-1"
-                                                        >
-                                                            {expandedCustomDates[group.id] ? '▼ Collapse' : '▶ Expand'} 
-                                                            <span className="text-gray-600">({group.customDates?.length || 0} dates)</span>
-                                                        </button>
-                                                    </div>
-                                                    
-                                                    {expandedCustomDates[group.id] && (
-                                                        <div className="mt-2 space-y-2">
-                                                            {group.customDates && group.customDates.map((dateObj, idx) => (
-                                                                <div key={idx} className="bg-gray-100 p-3 rounded border border-gray-300">
-                                                                    <div className="flex items-center gap-2 mb-2">
-                                                                        <span className="flex-1 text-black font-bold">
-                                                                            {new Date(dateObj.date).toLocaleDateString()}
-                                                                        </span>
-                                                                        <span className="text-sm text-gray-600">{getFrequencyLabel(dateObj.frequency || 'monthly')}</span>
-                                                                        <button
-                                                                            onClick={() => removeCustomDate(group.id, dateObj.date)}
-                                                                            className="text-red-600 hover:text-red-800 p-1"
-                                                                        >
-                                                                            <Trash size={16} />
-                                                                        </button>
-                                                                    </div>
-                                                                </div>
-                                                            ))}
-                                                            
-                                                            <div className="bg-blue-50 p-3 rounded border-2 border-blue-200">
-                                                                <div className="flex gap-2 mb-2">
-                                                                    <input
-                                                                        type="date"
-                                                                        value={newCustomDate}
-                                                                        onChange={(e) => setNewCustomDate(e.target.value)}
-                                                                        className="border-2 border-gray-300 rounded px-3 py-1 flex-1 text-black font-medium"
-                                                                    />
-                                                                    <select
-                                                                        value={newCustomFrequency}
-                                                                        onChange={(e) => setNewCustomFrequency(e.target.value)}
-                                                                        className="border-2 border-gray-300 rounded px-3 py-1 text-black font-medium"
-                                                                    >
-                                                                        <option value="weekly">Weekly</option>
-                                                                        <option value="biweekly">Bi-Weekly</option>
-                                                                        <option value="bimonthly">Bi-Monthly</option>
-                                                                        <option value="monthly">Monthly</option>
-                                                                        <option value="custom_range">Custom Range</option>
-                                                                    </select>
-                                                                    <button
-                                                                        onClick={() => addCustomDate(group.id)}
-                                                                        className="bg-blue-600 text-white px-4 py-1 rounded hover:bg-blue-700 font-semibold"
-                                                                    >
-                                                                        Add Date
-                                                                    </button>
-                                                                </div>
-                                                                
-                                                                {newCustomFrequency === 'custom_range' && (
-                                                                    <div className="flex gap-2 mt-2 pl-4 border-l-4 border-blue-600">
-                                                                        <div className="flex items-center gap-2">
-                                                                            <span className="text-xs font-semibold text-black">From:</span>
-                                                                            <input
-                                                                                type="date"
-                                                                                value={newCustomFrom}
-                                                                                onChange={(e) => setNewCustomFrom(e.target.value)}
-                                                                                className="border-2 border-gray-300 rounded px-2 py-1 text-sm text-black font-medium"
-                                                                            />
-                                                                        </div>
-                                                                        <div className="flex items-center gap-2">
-                                                                            <span className="text-xs font-semibold text-black">Through:</span>
-                                                                            <input
-                                                                                type="date"
-                                                                                value={newCustomThrough}
-                                                                                onChange={(e) => setNewCustomThrough(e.target.value)}
-                                                                                className="border-2 border-gray-300 rounded px-2 py-1 text-sm text-black font-medium"
-                                                                            />
-                                                                        </div>
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            )}
-
-                                            <div>
-                                                <span className="font-semibold text-black">Facilities:</span>
-                                                <div className="mt-2 space-y-2">
-                                                    {group.facilities.map(f => (
-                                                        <div key={f.id} className="flex items-center justify-between bg-gray-100 p-2 rounded">
-                                                            <span className="text-black font-medium">• {f.name}</span>
-                                                            <button
-                                                                onClick={() => removeFacility(group.id, f.id)}
-                                                                className="text-red-600 hover:text-red-800 p-1"
-                                                            >
-                                                                <Trash size={16} />
-                                                            </button>
-                                                        </div>
-                                                    ))}
-                                                    
-                                                    {addingToGroup === group.id ? (
-                                                        <div className="flex gap-2 mt-2">
-                                                            <input
-                                                                type="text"
-                                                                value={newFacilityName}
-                                                                onChange={(e) => setNewFacilityName(e.target.value)}
-                                                                placeholder="Facility name"
-                                                                className="border-2 border-gray-300 rounded px-3 py-1 flex-1 text-black font-medium"
-                                                                autoFocus
-                                                            />
-                                                            <button
-                                                                onClick={() => addFacility(group.id)}
-                                                                className="bg-green-600 text-white px-4 py-1 rounded hover:bg-green-700 font-semibold"
-                                                            >
-                                                                Add
-                                                            </button>
-                                                            <button
-                                                                onClick={() => {
-                                                                    setAddingToGroup(null);
-                                                                    setNewFacilityName('');
-                                                                }}
-                                                                className="bg-gray-400 text-white px-4 py-1 rounded hover:bg-gray-500 font-semibold"
-                                                            >
-                                                                Cancel
-                                                            </button>
-                                                        </div>
-                                                    ) : (
-                                                        <button
-                                                            onClick={() => setAddingToGroup(group.id)}
-                                                            className="w-full border-2 border-dashed border-gray-400 rounded p-2 hover:border-blue-500 hover:bg-blue-50 transition-colors text-black font-semibold"
-                                                        >
-                                                            + Add Facility
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
-
-                                <button
-                                    onClick={async () => {
-                                        try {
-                                            const response = await fetch(`${API_URL}/facility-groups`, {
-                                                method: 'POST',
-                                                headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify({
-                                                    name: 'New Group',
-                                                    billingType: 'monthly',
-                                                    billingDay: 1
-                                                })
-                                            });
-
-                                            if (!response.ok) {
-                                                throw new Error('Failed to create group');
+                                            <button
+                                                onClick={() => {
+                                                    setEditingStatus(null);
+                                                    setLocalStatuses(group.statuses || []);
+                                                }}
+                                                className="text-gray-600 hover:text-gray-800"
+                                                title="Cancel"
+                                            >
+                                                <Cancel size={16} />
+                                            </button>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <span 
+                                                className="px-2 py-1 rounded text-xs font-semibold flex-1 text-black border"
+                                                style={{ backgroundColor: status.color }}
+                                            >
+                                                {status.name}
+                                            </span>
+                                            <button
+                                                onClick={() => setEditingStatus(status.id)}
+                                                className="text-blue-600 hover:text-blue-800"
+                                                title="Edit"
+                                            >
+                                                <Edit2 size={16} />
+                                            </button>
+                                            <button
+                                                onClick={() => handleDeleteStatus(status.id)}
+                                                className="text-red-600 hover:text-red-800"
+                                                title="Delete"
+                                            >
+                                                <Trash size={16} />
+                                            </button>
+                                        </>
+                                    )}
+                                </div>
+                            ))}
+                            
+                            {showAddStatus ? (
+                                <div className="flex gap-2 pt-2 border-t">
+                                    <input
+                                        type="text"
+                                        value={newStatus.name}
+                                        onChange={(e) => setNewStatus({...newStatus, name: e.target.value})}
+                                        placeholder="Status name"
+                                        className="flex-1 px-2 py-1 border rounded text-sm"
+                                        autoFocus
+                                        onKeyPress={(e) => {
+                                            if (e.key === 'Enter' && newStatus.name.trim()) {
+                                                handleAddStatus();
                                             }
-
-                                            const result = await response.json();
-                                            
-                                            setFacilityGroups([...facilityGroups, {
-                                                id: result.id,
-                                                name: 'New Group',
-                                                billingType: 'monthly',
-                                                billingDay: 1,
-                                                customDates: [],
-                                                facilities: []
-                                            }]);
-                                        } catch (err) {
-                                            console.error('Error creating group:', err);
-                                            alert('Failed to create group. Please try again.');
-                                        }
-                                    }}
-                                    className="w-full border-3 border-dashed border-gray-400 rounded-lg p-5 hover:border-blue-600 hover:bg-blue-50 transition-colors bg-white"
+                                        }}
+                                    />
+                                    <select
+                                        value={newStatus.color}
+                                        onChange={(e) => setNewStatus({...newStatus, color: e.target.value})}
+                                        className="px-2 py-1 border rounded text-sm"
+                                        style={{ backgroundColor: newStatus.color }}
+                                    >
+                                        {STATUS_COLORS.map(color => (
+                                            <option key={color.value} value={color.value} style={{ backgroundColor: color.value }}>
+                                                {color.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <button
+                                        onClick={handleAddStatus}
+                                        className="bg-green-600 text-white px-3 py-1 rounded text-sm font-semibold hover:bg-green-700"
+                                        title="Add Status"
+                                    >
+                                        Add
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            setShowAddStatus(false);
+                                            setNewStatus({ name: '', color: '#93C5FD' });
+                                        }}
+                                        className="bg-gray-400 text-white px-3 py-1 rounded text-sm font-semibold hover:bg-gray-500"
+                                        title="Cancel"
+                                    >
+                                        Cancel
+                                    </button>
+                                </div>
+                            ) : (
+                                <button
+                                    onClick={() => setShowAddStatus(true)}
+                                    className="w-full border-2 border-dashed border-gray-400 rounded p-1 hover:border-blue-500 text-gray-600 font-semibold text-sm"
                                 >
-                                    <div className="flex items-center justify-center">
-                                        <Plus />
-                                        <span className="ml-2 font-bold text-black">Add New Group</span>
-                                    </div>
+                                    + Add Status
                                 </button>
-                            </div>
-)}
-
-{settingsTab === 'statuses' && (
-    <div className="bg-white border-2 border-gray-300 rounded-lg p-5">
-        <h3 className="text-lg font-bold text-black mb-4">Billing Statuses</h3>
-        <p className="text-sm text-gray-600 mb-4">
-            Manage the statuses available for billing records. These apply to all facility groups.
-        </p>
-        
-        <div className="space-y-2 mb-4">
-            {defaultStatuses.map((status, index) => (
-                <div key={status.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded border-2 border-gray-200">
-                    <div 
-                        className="w-8 h-8 rounded-full border-2 border-gray-300"
-                        style={{ backgroundColor: status.color }}
-                    ></div>
-                    
-                    {editingStatus === status.id ? (
-                        <>
-                            <input
-                                type="text"
-                                defaultValue={status.name}
-                                onBlur={(e) => {
-                                    if (e.target.value.trim()) {
-                                        handleUpdateStatus(status.id, { 
-                                            name: e.target.value,
-                                            color: status.color,
-                                            sortOrder: index
-                                        });
-                                    }
-                                }}
-                                className="border-2 border-gray-300 rounded px-3 py-1 font-semibold text-black flex-1"
-                                autoFocus
-                            />
-                            <select
-                                value={status.color}
-                                onChange={(e) => handleUpdateStatus(status.id, { 
-                                    name: status.name,
-                                    color: e.target.value,
-                                    sortOrder: index
-                                })}
-                                className="border-2 border-gray-300 rounded px-3 py-1 font-semibold text-black"
-                            >
-                                {STATUS_COLORS.map(color => (
-                                    <option key={color.value} value={color.value}>
-                                        {color.name}
-                                    </option>
-                                ))}
-                            </select>
-                        </>
-                    ) : (
-                        <>
-                            <span className="font-bold text-black flex-1">{status.name}</span>
-                            <button
-                                onClick={() => setEditingStatus(status.id)}
-                                className="text-blue-600 hover:text-blue-800 p-2"
-                            >
-                                <Edit2 size={16} />
-                            </button>
-                        </>
-                    )}
-                    
-                    <button
-                        onClick={() => handleDeleteStatus(status.id)}
-                        className="text-red-600 hover:text-red-800 p-2"
-                    >
-                        <Trash size={16} />
-                    </button>
-                </div>
-            ))}
-        </div>
-        
-        <div className="border-t-2 border-gray-300 pt-4">
-            <h4 className="font-bold text-black mb-3">Add New Status</h4>
-            <div className="flex gap-2">
-                <input
-                    type="text"
-                    value={newStatusName}
-                    onChange={(e) => setNewStatusName(e.target.value)}
-                    placeholder="Status name"
-                    className="border-2 border-gray-300 rounded px-3 py-2 flex-1 font-semibold text-black"
-                />
-                <select
-                    value={newStatusColor}
-                    onChange={(e) => setNewStatusColor(e.target.value)}
-                    className="border-2 border-gray-300 rounded px-3 py-2 font-semibold text-black"
-                >
-                    {STATUS_COLORS.map(color => (
-                        <option key={color.value} value={color.value}>
-                            {color.name}
-                        </option>
-                    ))}
-                </select>
-                <button
-                    onClick={handleAddStatus}
-                    className="bg-blue-600 text-white px-4 py-2 rounded font-bold hover:bg-blue-700 flex items-center gap-2"
-                >
-                    <Plus size={20} />
-                    Add
-                </button>
-            </div>
-        </div>
-    </div>
-)}
+                            )}
                         </div>
                     </div>
                 );
             };
 
-            const selectedGroupData = facilityGroups.find(g => g.id === selectedGroup);
-            
-            const getCycleLabel = (cycle) => {
-                if (cycle === 0) return 'Current Cycle';
-                if (cycle > 0) return `${cycle} ${cycle === 1 ? 'Cycle' : 'Cycles'} Ago`;
-                return `${Math.abs(cycle)} ${Math.abs(cycle) === 1 ? 'Cycle' : 'Cycles'} Ahead`;
-            };
-            
-            const getBillingTypeDisplay = (type) => {
-                switch(type) {
-                    case 'weekly': return 'Weekly';
-                    case 'biweekly': return 'Bi-Weekly';
-                    case 'bimonthly': return 'Bi-Monthly';
-                    case 'monthly': return 'Monthly';
-                    case 'custom': return 'Custom';
-                    default: return type;
-                }
+            // Settings Panel Component
+            const SettingsPanel = () => {
+                const [settingsTab, setSettingsTab] = useState('groups');
+                const [newGroupName, setNewGroupName] = useState('');
+                const [newGroupBillingType, setNewGroupBillingType] = useState('monthly');
+                const [newGroupBillingDate, setNewGroupBillingDate] = useState(1);
+                const [newGroupBillingDay, setNewGroupBillingDay] = useState('Monday');
+                const [showAddGroupForm, setShowAddGroupForm] = useState(false);
+                const [editingGroup, setEditingGroup] = useState(null);
+                const [newFacilityName, setNewFacilityName] = useState('');
+                const [tempGroups, setTempGroups] = useState(facilityGroups);
+
+                useEffect(() => {
+                    setTempGroups(facilityGroups);
+                }, [facilityGroups]);
+
+                const handleAddGroup = async () => {
+                    if (!newGroupName.trim()) {
+                        alert('Please enter a group name');
+                        return;
+                    }
+
+                    // Build request data based on billing type
+                    const requestData = { 
+                        name: newGroupName.trim(),
+                        billingType: newGroupBillingType
+                    };
+                    
+                    // Add the appropriate field based on billing type
+                    if (newGroupBillingType === 'monthly' || newGroupBillingType === 'bimonthly') {
+                        requestData.billingDate = newGroupBillingDate;
+                    } else if (newGroupBillingType === 'weekly' || newGroupBillingType === 'biweekly') {
+                        requestData.billingDay = newGroupBillingDay;
+                    }
+                    
+                    console.log('Sending to backend:', requestData);
+                    console.log('API URL:', `${API_URL}/facility-groups`);
+
+                    try {
+                        const response = await fetch(`${API_URL}/facility-groups`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(requestData)
+                        });
+                        
+                        console.log('Response status:', response.status);
+                        const responseText = await response.text();
+                        console.log('Response body:', responseText);
+                        
+                        if (response.ok) {
+                            try {
+                                const newGroup = JSON.parse(responseText);
+                                console.log('Group added successfully:', newGroup);
+                                await loadAllData();
+                                // Reset form
+                                setNewGroupName('');
+                                setNewGroupBillingType('monthly');
+                                setNewGroupBillingDate(1);
+                                setNewGroupBillingDay('Monday');
+                                setShowAddGroupForm(false);
+                            } catch (parseErr) {
+                                console.error('Error parsing response:', parseErr);
+                                // Still reload in case it worked
+                                await loadAllData();
+                                setNewGroupName('');
+                                setShowAddGroupForm(false);
+                            }
+                        } else {
+                            console.error('Server error response:', responseText);
+                            
+                            // Try to parse error details
+                            try {
+                                const errorData = JSON.parse(responseText);
+                                alert(`Failed to add group:\n${errorData.error || responseText}`);
+                            } catch {
+                                alert(`Failed to add group:\n${responseText}`);
+                            }
+                        }
+                    } catch (err) {
+                        console.error('Network or other error:', err);
+                        alert(`Failed to connect to server:\n${err.message}`);
+                    }
+                };
+
+                const handleUpdateGroup = async (groupId, updates) => {
+                    try {
+                        // Ensure we're sending the right field based on billing type
+                        const updateData = { ...updates };
+                        
+                        // If switching to weekly/biweekly, ensure billingDay is set
+                        if (updates.billingType === 'weekly' || updates.billingType === 'biweekly') {
+                            if (!updateData.billingDay) {
+                                updateData.billingDay = 'Monday';
+                            }
+                            // For weekly, billingDate should be null or not sent
+                            delete updateData.billingDate;
+                        } else if (updates.billingType === 'monthly' || updates.billingType === 'bimonthly') {
+                            // For monthly, ensure billingDate is an integer
+                            if (!updateData.billingDate) {
+                                updateData.billingDate = 1;
+                            }
+                            // For monthly, billingDay should not be sent
+                            delete updateData.billingDay;
+                        }
+                        
+                        const response = await fetch(`${API_URL}/facility-groups/${groupId}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(updateData)
+                        });
+                        
+                        if (response.ok) {
+                            await loadAllData();
+                        } else {
+                            const error = await response.text();
+                            console.error('Server error:', error);
+                            alert('Failed to update group: ' + error);
+                        }
+                    } catch (err) {
+                        console.error('Error updating group:', err);
+                        alert('Failed to update group: ' + err.message);
+                    }
+                };
+
+                const handleDeleteGroup = async (groupId) => {
+                    if (!confirm('Delete this group and all its facilities?')) return;
+
+                    try {
+                        await fetch(`${API_URL}/facility-groups/${groupId}`, {
+                            method: 'DELETE'
+                        });
+                        await loadAllData();
+                    } catch (err) {
+                        console.error('Error deleting group:', err);
+                        alert('Failed to delete group');
+                    }
+                };
+
+                const handleAddFacility = async (groupId) => {
+                    if (!newFacilityName.trim()) return;
+
+                    try {
+                        const response = await fetch(`${API_URL}/facilities`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ 
+                                name: newFacilityName,
+                                groupId: groupId 
+                            })
+                        });
+                        
+                        if (response.ok) {
+                            await loadAllData();
+                            setNewFacilityName('');
+                            setEditingGroup(null);
+                        }
+                    } catch (err) {
+                        console.error('Error adding facility:', err);
+                        alert('Failed to add facility');
+                    }
+                };
+
+                const handleDeleteFacility = async (facilityId) => {
+                    if (!confirm('Delete this facility?')) return;
+
+                    try {
+                        await fetch(`${API_URL}/facilities/${facilityId}`, {
+                            method: 'DELETE'
+                        });
+                        await loadAllData();
+                    } catch (err) {
+                        console.error('Error deleting facility:', err);
+                        alert('Failed to delete facility');
+                    }
+                };
+
+                const saveMonthEndUrl = async () => {
+                    try {
+                        await fetch(`${API_URL}/settings`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ monthEndUrl })
+                        });
+                    } catch (err) {
+                        console.error('Error saving settings:', err);
+                    }
+                };
+
+                return (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                        <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+                            <div className="p-6 border-b flex justify-between items-center">
+                                <h2 className="text-2xl font-bold text-black">Settings</h2>
+                                <button onClick={() => { setShowSettings(false); saveMonthEndUrl(); }} className="text-gray-500 hover:text-gray-700">
+                                    <X size={24} />
+                                </button>
+                            </div>
+
+                            <div className="p-6">
+                                <div className="flex border-b mb-6">
+                                    <button
+                                        onClick={() => setSettingsTab('groups')}
+                                        className={`px-6 py-3 font-bold ${settingsTab === 'groups' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-600'}`}
+                                    >
+                                        Facility Groups
+                                    </button>
+                                    <button
+                                        onClick={() => setSettingsTab('monthend')}
+                                        className={`px-6 py-3 font-bold ${settingsTab === 'monthend' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-600'}`}
+                                    >
+                                        Month End URL
+                                    </button>
+                                </div>
+
+                                {settingsTab === 'groups' ? (
+                                    <div>
+                                        <div className="mb-6">
+                                            {!showAddGroupForm ? (
+                                                <button
+                                                    onClick={() => setShowAddGroupForm(true)}
+                                                    className="w-full border-2 border-dashed border-blue-400 rounded-lg p-3 hover:border-blue-600 text-blue-600 font-bold"
+                                                >
+                                                    + Add New Group
+                                                </button>
+                                            ) : (
+                                                <div className="border-2 border-blue-400 rounded-lg p-4 bg-blue-50">
+                                                    <h4 className="font-bold text-lg mb-3">New Facility Group</h4>
+                                                    
+                                                    <div className="space-y-3">
+                                                        <div>
+                                                            <label className="block text-sm font-semibold text-gray-700 mb-1">
+                                                                Group Name
+                                                            </label>
+                                                            <input
+                                                                type="text"
+                                                                placeholder="Enter group name..."
+                                                                value={newGroupName}
+                                                                onChange={(e) => setNewGroupName(e.target.value)}
+                                                                className="w-full px-3 py-2 border-2 border-gray-300 rounded font-semibold"
+                                                            />
+                                                        </div>
+                                                        
+                                                        <div className="grid grid-cols-2 gap-3">
+                                                            <div>
+                                                                <label className="block text-sm font-semibold text-gray-700 mb-1">
+                                                                    Billing Cycle
+                                                                </label>
+                                                                <select
+                                                                    value={newGroupBillingType}
+                                                                    onChange={(e) => setNewGroupBillingType(e.target.value)}
+                                                                    className="w-full px-2 py-2 border-2 border-gray-300 rounded font-semibold"
+                                                                >
+                                                                    <option value="weekly">Weekly</option>
+                                                                    <option value="biweekly">Biweekly</option>
+                                                                    <option value="monthly">Monthly</option>
+                                                                    <option value="bimonthly">Bimonthly</option>
+                                                                    <option value="custom">Custom</option>
+                                                                </select>
+                                                            </div>
+                                                            
+                                                            {(newGroupBillingType === 'monthly' || newGroupBillingType === 'bimonthly') && (
+                                                                <div>
+                                                                    <label className="block text-sm font-semibold text-gray-700 mb-1">
+                                                                        Billing Day of Month
+                                                                    </label>
+                                                                    <input
+                                                                        type="number"
+                                                                        min="1"
+                                                                        max="31"
+                                                                        value={newGroupBillingDate}
+                                                                        onChange={(e) => setNewGroupBillingDate(parseInt(e.target.value) || 1)}
+                                                                        className="w-full px-2 py-2 border-2 border-gray-300 rounded font-semibold"
+                                                                    />
+                                                                </div>
+                                                            )}
+                                                            
+                                                            {(newGroupBillingType === 'weekly' || newGroupBillingType === 'biweekly') && (
+                                                                <div>
+                                                                    <label className="block text-sm font-semibold text-gray-700 mb-1">
+                                                                        Billing Day of Week
+                                                                    </label>
+                                                                    <select
+                                                                        value={newGroupBillingDay}
+                                                                        onChange={(e) => setNewGroupBillingDay(e.target.value)}
+                                                                        className="w-full px-2 py-2 border-2 border-gray-300 rounded font-semibold"
+                                                                    >
+                                                                        <option value="Monday">Monday</option>
+                                                                        <option value="Tuesday">Tuesday</option>
+                                                                        <option value="Wednesday">Wednesday</option>
+                                                                        <option value="Thursday">Thursday</option>
+                                                                        <option value="Friday">Friday</option>
+                                                                        <option value="Saturday">Saturday</option>
+                                                                        <option value="Sunday">Sunday</option>
+                                                                    </select>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                        
+                                                        <div className="flex gap-2 pt-2">
+                                                            <button
+                                                                onClick={handleAddGroup}
+                                                                className="flex-1 bg-blue-600 text-white px-4 py-2 rounded font-bold hover:bg-blue-700"
+                                                            >
+                                                                Create Group
+                                                            </button>
+                                                            <button
+                                                                onClick={() => {
+                                                                    setShowAddGroupForm(false);
+                                                                    setNewGroupName('');
+                                                                    setNewGroupBillingType('monthly');
+                                                                    setNewGroupBillingDate(1);
+                                                                    setNewGroupBillingDay('Monday');
+                                                                }}
+                                                                className="px-4 py-2 bg-gray-400 text-white rounded font-bold hover:bg-gray-500"
+                                                            >
+                                                                Cancel
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        <div className="space-y-4">
+                                            {tempGroups.map(group => (
+                                                <div key={group.id} className="border-2 border-gray-200 rounded-lg p-4">
+                                                    <div className="flex justify-between items-center mb-3">
+                                                        <h3 className="text-lg font-bold text-black">{group.name}</h3>
+                                                        <button
+                                                            onClick={() => handleDeleteGroup(group.id)}
+                                                            className="text-red-500 hover:text-red-700"
+                                                        >
+                                                            <Trash />
+                                                        </button>
+                                                    </div>
+
+                                                    {/* Billing Configuration */}
+                                                    <div className="grid grid-cols-2 gap-4 mb-3">
+                                                        <div>
+                                                            <label className="block text-sm font-semibold text-gray-700 mb-1">
+                                                                Billing Cycle
+                                                            </label>
+                                                            <select
+                                                                value={group.billingType || 'monthly'}
+                                                                onChange={(e) => {
+                                                                    const updated = tempGroups.map(g => 
+                                                                        g.id === group.id ? {...g, billingType: e.target.value} : g
+                                                                    );
+                                                                    setTempGroups(updated);
+                                                                    // Don't auto-update, wait for explicit save
+                                                                }}
+                                                                className="w-full px-2 py-1 border-2 border-gray-300 rounded font-semibold"
+                                                            >
+                                                                <option value="weekly">Weekly</option>
+                                                                <option value="biweekly">Biweekly</option>
+                                                                <option value="monthly">Monthly</option>
+                                                                <option value="bimonthly">Bimonthly</option>
+                                                                <option value="custom">Custom</option>
+                                                            </select>
+                                                        </div>
+                                                        
+                                                        {group.billingType === 'monthly' && (
+                                                            <div>
+                                                                <label className="block text-sm font-semibold text-gray-700 mb-1">
+                                                                    Billing Day
+                                                                </label>
+                                                                <input
+                                                                    type="number"
+                                                                    min="1"
+                                                                    max="31"
+                                                                    value={group.billingDate || 1}
+                                                                    onChange={(e) => {
+                                                                        const value = parseInt(e.target.value) || 1;
+                                                                        const updated = tempGroups.map(g => 
+                                                                            g.id === group.id ? {...g, billingDate: value} : g
+                                                                        );
+                                                                        setTempGroups(updated);
+                                                                        // Don't auto-update, wait for explicit save
+                                                                    }}
+                                                                    className="w-full px-2 py-1 border-2 border-gray-300 rounded font-semibold"
+                                                                />
+                                                            </div>
+                                                        )}
+                                                        
+                                                        {group.billingType === 'weekly' && (
+                                                            <div>
+                                                                <label className="block text-sm font-semibold text-gray-700 mb-1">
+                                                                    Billing Day
+                                                                </label>
+                                                                <select
+                                                                    value={group.billingDay || 'Monday'}
+                                                                    onChange={(e) => {
+                                                                        const updated = tempGroups.map(g => 
+                                                                            g.id === group.id ? {...g, billingDay: e.target.value} : g
+                                                                        );
+                                                                        setTempGroups(updated);
+                                                                        // Don't auto-update, wait for explicit save
+                                                                    }}
+                                                                    className="w-full px-2 py-1 border-2 border-gray-300 rounded font-semibold"
+                                                                >
+                                                                    <option value="Monday">Monday</option>
+                                                                    <option value="Tuesday">Tuesday</option>
+                                                                    <option value="Wednesday">Wednesday</option>
+                                                                    <option value="Thursday">Thursday</option>
+                                                                    <option value="Friday">Friday</option>
+                                                                    <option value="Saturday">Saturday</option>
+                                                                    <option value="Sunday">Sunday</option>
+                                                                </select>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    
+                                                    {/* Save button for billing settings */}
+                                                    <div className="mb-3">
+                                                        <button
+                                                            onClick={() => {
+                                                                const groupToUpdate = tempGroups.find(g => g.id === group.id);
+                                                                if (groupToUpdate) {
+                                                                    handleUpdateGroup(group.id, {
+                                                                        billingType: groupToUpdate.billingType,
+                                                                        billingDate: groupToUpdate.billingDate,
+                                                                        billingDay: groupToUpdate.billingDay
+                                                                    });
+                                                                }
+                                                            }}
+                                                            className="bg-green-600 text-white px-3 py-1 rounded text-sm font-semibold hover:bg-green-700"
+                                                        >
+                                                            Save Billing Settings
+                                                        </button>
+                                                    </div>
+
+                                                    {/* Status Manager for this group */}
+                                                    <GroupStatusManager group={group} />
+
+                                                    {/* Facilities */}
+                                                    <div className="mt-4">
+                                                        <h4 className="font-semibold text-sm text-gray-700 mb-2">Facilities</h4>
+                                                        <div className="space-y-2">
+                                                            {group.facilities && group.facilities.map(f => (
+                                                                <div key={f.id} className="flex items-center justify-between bg-gray-100 p-2 rounded">
+                                                                    <span className="text-black font-medium">{f.name}</span>
+                                                                    <button
+                                                                        onClick={() => handleDeleteFacility(f.id)}
+                                                                        className="text-red-600 hover:text-red-800"
+                                                                    >
+                                                                        <Trash size={16} />
+                                                                    </button>
+                                                                </div>
+                                                            ))}
+                                                            
+                                                            {editingGroup === group.id ? (
+                                                                <div className="flex gap-2">
+                                                                    <input
+                                                                        type="text"
+                                                                        value={newFacilityName}
+                                                                        onChange={(e) => setNewFacilityName(e.target.value)}
+                                                                        placeholder="Facility name"
+                                                                        className="flex-1 px-2 py-1 border rounded text-sm"
+                                                                        autoFocus
+                                                                    />
+                                                                    <button
+                                                                        onClick={() => handleAddFacility(group.id)}
+                                                                        className="bg-green-600 text-white px-3 py-1 rounded text-sm font-semibold"
+                                                                    >
+                                                                        Add
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            setEditingGroup(null);
+                                                                            setNewFacilityName('');
+                                                                        }}
+                                                                        className="bg-gray-400 text-white px-3 py-1 rounded text-sm font-semibold"
+                                                                    >
+                                                                        Cancel
+                                                                    </button>
+                                                                </div>
+                                                            ) : (
+                                                                <button
+                                                                    onClick={() => setEditingGroup(group.id)}
+                                                                    className="w-full border-2 border-dashed border-gray-400 rounded p-2 hover:border-blue-500 text-gray-600 font-semibold text-sm"
+                                                                >
+                                                                    + Add Facility
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 mb-2">
+                                            Month End Tracker URL
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={monthEndUrl}
+                                            onChange={(e) => setMonthEndUrl(e.target.value)}
+                                            placeholder="https://example.com/month-end-tracker"
+                                            className="w-full px-3 py-2 border-2 border-gray-300 rounded font-semibold"
+                                        />
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                );
             };
 
             if (loading) {
                 return (
-                    <div className="flex h-screen items-center justify-center bg-gray-200">
-                        <div className="text-center">
-                            <div className="text-2xl font-bold text-black mb-4">Loading Billing Tracker...</div>
-                            <div className="text-gray-600">Please wait</div>
-                        </div>
+                    <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+                        <div className="text-2xl font-bold text-gray-600">Loading...</div>
                     </div>
                 );
             }
 
             if (error) {
                 return (
-                    <div className="flex h-screen items-center justify-center bg-gray-200">
-                        <div className="text-center bg-red-50 border-2 border-red-300 rounded-lg p-8">
-                            <div className="text-2xl font-bold text-red-700 mb-4">Error Loading Data</div>
-                            <div className="text-red-600 mb-4">{error}</div>
-                            <button
-                                onClick={loadAllData}
-                                className="bg-red-600 text-white px-6 py-2 rounded hover:bg-red-700 font-semibold"
+                    <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+                        <div className="bg-white p-8 rounded-lg shadow-lg max-w-md w-full">
+                            <h2 className="text-2xl font-bold mb-4 text-red-600">Connection Error</h2>
+                            <p className="text-gray-700 mb-4">{error}</p>
+                            <div className="bg-gray-100 p-4 rounded mb-4">
+                                <p className="text-sm font-semibold mb-2">Troubleshooting steps:</p>
+                                <ol className="text-sm text-gray-600 list-decimal list-inside space-y-1">
+                                    <li>Make sure the backend server is running</li>
+                                    <li>Check that it's running on port 5000</li>
+                                    <li>Run: <code className="bg-gray-200 px-1">python app.py</code> in the backend folder</li>
+                                    <li>Check the console for any error messages</li>
+                                </ol>
+                            </div>
+                            <button 
+                                onClick={loadAllData} 
+                                className="w-full px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 font-semibold"
                             >
-                                Retry
+                                Retry Connection
                             </button>
                         </div>
                     </div>
                 );
             }
 
-            return (
-                <div className="flex h-screen bg-gray-200">
-                    <div className="w-64 bg-white border-r-2 border-gray-300">
-                        <div className="p-4 border-b-2 border-gray-300 bg-gray-100">
-                            <h1 className="text-xl font-bold text-black">Billing Tracker</h1>
-                        </div>
-                        
-                        <div className="border-b-2 border-gray-300 bg-gray-50">
-                            <button
-                                onClick={() => setActiveTab('billing')}
-                                className={`w-1/2 inline-block px-4 py-3 text-center font-semibold transition-colors ${
-                                    activeTab === 'billing'
-                                        ? 'bg-white text-blue-600 border-b-4 border-blue-600'
-                                        : 'text-gray-600 hover:bg-gray-100'
-                                }`}
-                            >
-                                Billing
-                            </button>
-                            <button
-                                onClick={() => setActiveTab('monthend')}
-                                className={`w-1/2 inline-block px-4 py-3 text-center font-semibold transition-colors ${
-                                    activeTab === 'monthend'
-                                        ? 'bg-white text-blue-600 border-b-4 border-blue-600'
-                                        : 'text-gray-600 hover:bg-gray-100'
-                                }`}
-                            >
-                                Month End
-                            </button>
-                        </div>
-                        
-                        <div className="p-2">
-                            {facilityGroups.map(group => (
-                                <button
-                                    key={group.id}
-                                    onClick={() => setSelectedGroup(group.id)}
-                                    className={`w-full text-left px-4 py-3 rounded-lg mb-1 transition-colors border-2 ${
-                                        selectedGroup === group.id
-                                            ? 'bg-blue-600 text-white border-blue-700 font-semibold'
-                                            : 'hover:bg-gray-100 text-black border-gray-300 font-medium'
-                                    }`}
-                                >
-                                    <div className="font-bold">{group.name}</div>
-                                    <div className="text-xs mt-1">
-                                        {getBillingTypeDisplay(group.billingType)} Billing
-                                    </div>
-                                </button>
-                            ))}
-                        </div>
+            const selectedGroupData = facilityGroups.find(g => g.id === selectedGroup);
+            const currentCycleData = cycles.find(c => c.index === currentCycle);
 
-                        <div className="absolute bottom-4 left-4 right-4">
-                            <button
-                                onClick={() => setShowSettings(true)}
-                                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors border-2 border-gray-400 font-semibold text-black"
-                            >
-                                <Settings />
-                                <span>Settings</span>
-                            </button>
+            return (
+                <div className="min-h-screen bg-gray-100 flex flex-col">
+                    {/* Header */}
+                    <div className="bg-white shadow-sm border-b-2 border-gray-200">
+                        <div className="px-6 py-4 flex justify-between items-center">
+                            <h1 className="text-3xl font-bold text-black">Billing Tracker</h1>
+                            <div className="flex items-center gap-4">
+                                {/* Tab Navigation */}
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={() => setActiveTab('billing')}
+                                        className={`px-4 py-2 font-bold rounded-lg ${
+                                            activeTab === 'billing' 
+                                                ? 'bg-blue-600 text-white' 
+                                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                        }`}
+                                    >
+                                        Billing
+                                    </button>
+                                    <button
+                                        onClick={() => setActiveTab('monthend')}
+                                        className={`px-4 py-2 font-bold rounded-lg ${
+                                            activeTab === 'monthend' 
+                                                ? 'bg-green-600 text-white' 
+                                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                        }`}
+                                    >
+                                        Month End
+                                    </button>
+                                </div>
+                                <button
+                                    onClick={() => setShowSettings(true)}
+                                    className="bg-gray-600 text-white p-2 rounded-lg hover:bg-gray-700"
+                                >
+                                    <Settings />
+                                </button>
+                            </div>
                         </div>
                     </div>
 
-                    <div className="flex-1 flex flex-col">
+                    {/* Main Content */}
+                    <div className="flex-1 flex">
                         {activeTab === 'billing' ? (
                             <>
-                                <div className="bg-white border-b-2 border-gray-300 p-4">
-                                    <div className="flex items-center justify-between">
-                                        <div>
-                                            <h2 className="text-2xl font-bold text-black">{selectedGroupData?.name}</h2>
-                                            <p className="text-sm text-gray-700 mt-1 font-medium">
-                                                {getBillingTypeDisplay(selectedGroupData?.billingType)} Billing Schedule
-                                            </p>
-                                        </div>
-                                        
-                                        <div className="flex items-center gap-2">
+                                {/* Sidebar */}
+                                <div className="w-64 bg-white shadow-lg">
+                                    <div className="p-4 border-b-2 border-gray-200">
+                                        <h2 className="font-bold text-lg text-black">Facility Groups</h2>
+                                    </div>
+                                    <div className="p-2">
+                                        {facilityGroups.map(group => (
                                             <button
-                                                onClick={() => setCurrentCycle(Math.min(
-                                                    selectedGroupData?.billingType === 'custom' 
-                                                        ? Math.max(0, (selectedGroupData?.customDates?.length || 1) - 1)
-                                                        : MAX_PAST_CYCLES, 
-                                                    currentCycle + 1
-                                                ))}
-                                                disabled={currentCycle === (
-                                                    selectedGroupData?.billingType === 'custom' 
-                                                        ? Math.max(0, (selectedGroupData?.customDates?.length || 1) - 1)
-                                                        : MAX_PAST_CYCLES
-                                                )}
-                                                className="p-2 hover:bg-gray-200 rounded disabled:opacity-50 border-2 border-gray-300"
+                                                key={group.id}
+                                                onClick={() => {
+                                                    setSelectedGroup(group.id);
+                                                    setCurrentCycle(0); // Reset to current cycle when switching groups
+                                                }}
+                                                className={`w-full text-left px-4 py-3 rounded-lg mb-2 font-bold transition-colors ${
+                                                    selectedGroup === group.id
+                                                        ? 'bg-blue-600 text-white'
+                                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                                }`}
                                             >
-                                                <ChevronLeft />
+                                                {group.name}
+                                                <div className="text-xs mt-1 opacity-75">
+                                                    {group.facilities ? group.facilities.length : 0} facilities
+                                                </div>
                                             </button>
-                                            <span className="px-4 py-2 bg-gray-200 rounded font-bold text-black border-2 border-gray-400 min-w-[140px] text-center">
-                                                {getCycleLabel(currentCycle)}
-                                            </span>
-                                            <button
-                                                onClick={() => setCurrentCycle(Math.max(
-                                                    selectedGroupData?.billingType === 'custom' ? 0 : -MAX_FUTURE_CYCLES, 
-                                                    currentCycle - 1
-                                                ))}
-                                                disabled={currentCycle === (selectedGroupData?.billingType === 'custom' ? 0 : -MAX_FUTURE_CYCLES)}
-                                                className="p-2 hover:bg-gray-200 rounded disabled:opacity-50 border-2 border-gray-300"
-                                            >
-                                                <ChevronRight />
-                                            </button>
-                                        </div>
+                                        ))}
                                     </div>
                                 </div>
 
-                                <div className="flex-1 overflow-auto p-6">
-                                    {selectedGroupData?.billingType === 'custom' && (!selectedGroupData?.customDates || selectedGroupData?.customDates.length === 0) ? (
-                                        <div className="bg-white rounded-lg border-2 border-gray-300 p-12 text-center">
-                                            <h3 className="text-xl font-bold text-black mb-3">No Custom Billing Dates</h3>
-                                            <p className="text-gray-600 mb-4">
-                                                This group uses custom billing but no dates have been configured yet.
-                                            </p>
-                                            <button
-                                                onClick={() => setShowSettings(true)}
-                                                className="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors"
-                                            >
-                                                Add Custom Dates in Settings
-                                            </button>
-                                        </div>
-                                    ) : (
-                                        <div className="bg-white rounded-lg border-2 border-gray-300">
-                                            <table className="w-full">
-                                                <thead className="bg-gray-200 border-b-2 border-gray-300">
-													<tr>
-                                                        <th className="px-6 py-3 text-left text-xs font-bold text-black uppercase tracking-wider">
-                                                            Facility Name
-                                                        </th>
-                                                        <th className="px-6 py-3 text-left text-xs font-bold text-black uppercase tracking-wider">
-                                                            Billed Date
-                                                        </th>
-                                                        <th className="px-6 py-3 text-left text-xs font-bold text-black uppercase tracking-wider">
-                                                            From Date
-                                                        </th>
-                                                        <th className="px-6 py-3 text-left text-xs font-bold text-black uppercase tracking-wider">
-                                                            Through Date
-                                                        </th>
-                                                        <th className="px-6 py-3 text-left text-xs font-bold text-black uppercase tracking-wider">
-                                                            Status
-                                                        </th>
-                                                        <th className="px-6 py-3 text-left text-xs font-bold text-black uppercase tracking-wider">
-                                                            Billed Amount
-                                                        </th>
-                                                        <th className="px-6 py-3 text-left text-xs font-bold text-black uppercase tracking-wider">
-                                                            Paid Amount
-                                                        </th>
-                                                        <th className="px-6 py-3 text-left text-xs font-bold text-black uppercase tracking-wider">
-                                                            Paid Date
-                                                        </th>
-                                                        <th className="px-6 py-3 text-left text-xs font-bold text-black uppercase tracking-wider">
-                                                            Actions
-                                                        </th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody className="divide-y-2 divide-gray-200">
-                                                    {selectedGroupData?.facilities.map(facility => {
-                                                        const key = `${facility.id}-${currentCycle}`;
-                                                        const record = billingRecords[key];
-                                                        const isEditing = editingRecord === key;
-                                                        const groupStatuses = getStatusesForGroup(selectedGroupData.id);
-                                                        const currentStatus = groupStatuses.find(s => s.id === record?.statusId);
+                                {/* Main Content Area */}
+                                <div className="flex-1 p-6">
+                                    {selectedGroup && (
+                                        <div>
+                                            {/* Cycle Navigation */}
+                                            <div className="flex justify-center items-center mb-6">
+                                                <button
+                                                    onClick={() => setCurrentCycle(Math.max(currentCycle - 1, -MAX_PAST_CYCLES))}
+                                                    className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                                                    disabled={currentCycle <= -MAX_PAST_CYCLES}
+                                                >
+                                                    <ChevronLeft />
+                                                </button>
+                                                <h2 className="mx-4 text-2xl font-bold text-black min-w-[200px] text-center">
+                                                    {getCycleLabel(currentCycle)}
+                                                </h2>
+                                                <button
+                                                    onClick={() => setCurrentCycle(Math.min(currentCycle + 1, MAX_FUTURE_CYCLES))}
+                                                    className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                                                    disabled={currentCycle >= MAX_FUTURE_CYCLES}
+                                                >
+                                                    <ChevronRight />
+                                                </button>
+                                            </div>
 
-                                                        if (!record || !record.billingDate) {
-                                                            return null;
-                                                        }
-
-                                                        return (
-                                                            <tr key={key} className="hover:bg-gray-50">
-                                                                <td className="px-6 py-4 whitespace-nowrap font-bold text-black">
-                                                                    {facility.name}
-                                                                </td>
-                                                                <td className="px-6 py-4 whitespace-nowrap text-black font-semibold">
-                                                                    {displayDate(record.billingDate)}
-                                                                </td>
-                                                                <td className="px-6 py-4 whitespace-nowrap text-black font-semibold">
-                                                                    {displayDate(record.fromDate)}
-                                                                </td>
-                                                                <td className="px-6 py-4 whitespace-nowrap text-black font-semibold">
-                                                                    {displayDate(record.throughDate)}
-                                                                </td>
-                                                                <td className="px-6 py-4 whitespace-nowrap">
-                                                                    {isEditing ? (
-                                                                        <select
-                                                                            value={record.statusId || ''}
-                                                                            onChange={(e) => handleSaveRecord(key, { statusId: e.target.value ? parseInt(e.target.value) : null })}
-                                                                            className="border-2 border-gray-300 rounded px-2 py-1 font-semibold text-black"
-                                                                        >
-                                                                            <option value="">No Status</option>
-                                                                            {groupStatuses.map(status => (
-                                                                                <option key={status.id} value={status.id}>
-                                                                                    {status.name}
-                                                                                </option>
-                                                                            ))}
-                                                                        </select>
-                                                                    ) : (
-                                                                        <StatusBadge status={currentStatus} />
-                                                                    )}
-                                                                </td>
-																<td className="px-6 py-4 whitespace-nowrap">
-                                                                    {isEditing ? (
-                                                                        <input
-                                                                            type="text"
-                                                                            value={record.billedAmount || ''}
-                                                                            onChange={(e) => handleSaveRecord(key, { billedAmount: e.target.value })}
-                                                                            className="border-2 border-gray-300 rounded px-2 py-1 w-28 font-semibold text-black"
-                                                                            placeholder="$0.00"
-                                                                        />
-                                                                    ) : (
-                                                                        <span className={record.billedAmount ? 'text-blue-700 font-bold' : 'text-gray-400 font-semibold'}>
-                                                                            {record.billedAmount || '—'}
-                                                                        </span>
-                                                                    )}
-                                                                </td>
-                                                                <td className="px-6 py-4 whitespace-nowrap">
-                                                                    {isEditing ? (
-                                                                        <input
-                                                                            type="text"
-                                                                            value={record.paidAmount || ''}
-                                                                            onChange={(e) => handleSaveRecord(key, { paidAmount: e.target.value })}
-                                                                            className="border-2 border-gray-300 rounded px-2 py-1 w-28 font-semibold text-black"
-                                                                            placeholder="$0.00"
-                                                                        />
-                                                                    ) : (
-                                                                        <span className={record.paidAmount ? 'text-green-700 font-bold' : 'text-gray-400 font-semibold'}>
-                                                                            {record.paidAmount || '—'}
-                                                                        </span>
-                                                                    )}
-                                                                </td>
-                                                                <td className="px-6 py-4 whitespace-nowrap">
-                                                                    {isEditing ? (
-                                                                        <input
-                                                                            type="text"
-                                                                            value={record.paidDate || ''}
-                                                                            onChange={(e) => handleSaveRecord(key, { paidDate: e.target.value })}
-                                                                            className="border-2 border-gray-300 rounded px-2 py-1 w-28 font-semibold text-black"
-                                                                            placeholder="MMDDYYYY"
-                                                                        />
-                                                                    ) : (
-                                                                        <span className={record.paidDate ? 'text-black font-semibold' : 'text-gray-400 font-semibold'}>
-                                                                            {displayDate(record.paidDate) || '—'}
-                                                                        </span>
-                                                                    )}
-                                                                </td>
-                                                                <td className="px-6 py-4 whitespace-nowrap">
-                                                                    <button
-                                                                        onClick={() => setEditingRecord(isEditing ? null : key)}
-                                                                        className="text-blue-600 hover:text-blue-800 font-bold"
-                                                                    >
-                                                                        {isEditing ? <Save /> : <Edit2 />}
-                                                                    </button>
-                                                                </td>
-                                                            </tr>
-                                                        );
-                                                    })}
-                                                </tbody>
-                                            </table>
+                                            {/* Billing Table */}
+                                            <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+                                                <table className="w-full">
+                                                    <thead className="bg-gray-50 border-b-2 border-gray-200">
+                                                        <tr>
+                                                            <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
+                                                                Facility
+                                                            </th>
+                                                            <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
+                                                                Billing Date
+                                                            </th>
+                                                            <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
+                                                                From Date
+                                                            </th>
+                                                            <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
+                                                                Through Date
+                                                            </th>
+                                                            <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
+                                                                Status
+                                                            </th>
+                                                            <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
+                                                                Billed
+                                                            </th>
+                                                            <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
+                                                                Paid
+                                                            </th>
+                                                            <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
+                                                                Date Paid
+                                                            </th>
+                                                            <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
+                                                                Actions
+                                                            </th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="bg-white divide-y divide-gray-200">
+                                                        {getCurrentFacilities().map(facility => {
+                                                            const key = `${facility.id}-${currentCycle}`;
+                                                            const record = billingRecords[key] || {};
+                                                            const isEditing = editingRecord === key;
+                                                            const groupStatuses = getCurrentGroupStatuses();
+                                                            const currentStatus = groupStatuses.find(s => s.id === record.statusId);
+                                                            const cycle = cycles.find(c => c.index === currentCycle);
+                                                            
+                                                            // Always calculate dates for display
+                                                            const currentGroup = facilityGroups.find(g => g.id === selectedGroup);
+                                                            const calculatedDates = getCycleDates(currentCycle, currentGroup?.billingType || 'monthly', currentGroup);
+                                                            
+                                                            // Use saved dates if they exist, otherwise use calculated dates
+                                                            const displayBillingDate = record.billingDate || calculatedDates.billingDate;
+                                                            const displayFromDate = record.fromDate || calculatedDates.fromDate;
+                                                            const displayThroughDate = record.throughDate || calculatedDates.throughDate;
+                                                            
+                                                            return (
+                                                                <tr key={facility.id} className="hover:bg-gray-50">
+                                                                    <td className="px-6 py-4 whitespace-nowrap">
+                                                                        <div className="text-sm font-bold text-gray-900">
+                                                                            {facility.name}
+                                                                        </div>
+                                                                    </td>
+                                                                    <td className="px-6 py-4 whitespace-nowrap">
+                                                                        {isEditing ? (
+                                                                            <input
+                                                                                type="date"
+                                                                                value={formatDateForInput(displayBillingDate)}
+                                                                                onChange={(e) => {
+                                                                                    const newValue = formatDateForStorage(e.target.value);
+                                                                                    handleFieldUpdate(key, 'billingDate', newValue);
+                                                                                }}
+                                                                                className="border-2 border-gray-300 rounded px-2 py-1 font-semibold text-black"
+                                                                            />
+                                                                        ) : (
+                                                                            <span className="text-black font-semibold">
+                                                                                {displayDate(displayBillingDate)}
+                                                                            </span>
+                                                                        )}
+                                                                    </td>
+                                                                    <td className="px-6 py-4 whitespace-nowrap">
+                                                                        {isEditing ? (
+                                                                            <input
+                                                                                type="date"
+                                                                                value={formatDateForInput(displayFromDate)}
+                                                                                onChange={(e) => {
+                                                                                    const newValue = formatDateForStorage(e.target.value);
+                                                                                    handleFieldUpdate(key, 'fromDate', newValue);
+                                                                                }}
+                                                                                className="border-2 border-gray-300 rounded px-2 py-1 font-semibold text-black"
+                                                                            />
+                                                                        ) : (
+                                                                            <span className="text-black font-semibold">
+                                                                                {displayDate(displayFromDate)}
+                                                                            </span>
+                                                                        )}
+                                                                    </td>
+                                                                    <td className="px-6 py-4 whitespace-nowrap">
+                                                                        {isEditing ? (
+                                                                            <input
+                                                                                type="date"
+                                                                                value={formatDateForInput(displayThroughDate)}
+                                                                                onChange={(e) => {
+                                                                                    const newValue = formatDateForStorage(e.target.value);
+                                                                                    handleFieldUpdate(key, 'throughDate', newValue);
+                                                                                }}
+                                                                                className="border-2 border-gray-300 rounded px-2 py-1 font-semibold text-black"
+                                                                            />
+                                                                        ) : (
+                                                                            <span className="text-black font-semibold">
+                                                                                {displayDate(displayThroughDate)}
+                                                                            </span>
+                                                                        )}
+                                                                    </td>
+                                                                    <td className="px-6 py-4 whitespace-nowrap">
+                                                                        {isEditing ? (
+                                                                            <select
+                                                                                value={record.statusId || ''}
+                                                                                onChange={(e) => handleFieldUpdate(key, 'statusId', e.target.value ? parseInt(e.target.value) : null)}
+                                                                                className="border-2 border-gray-300 rounded px-2 py-1 font-semibold text-black"
+                                                                            >
+                                                                                <option value="">No Status</option>
+                                                                                {groupStatuses.map(status => (
+                                                                                    <option key={status.id} value={status.id}>
+                                                                                        {status.name}
+                                                                                    </option>
+                                                                                ))}
+                                                                            </select>
+                                                                        ) : (
+                                                                            <StatusBadge status={currentStatus} />
+                                                                        )}
+                                                                    </td>
+                                                                    <td className="px-6 py-4 whitespace-nowrap">
+                                                                        {isEditing ? (
+                                                                            <input
+                                                                                type="text"
+                                                                                value={record.billedAmount || ''}
+                                                                                onChange={(e) => handleFieldUpdate(key, 'billedAmount', e.target.value)}
+                                                                                className="border-2 border-gray-300 rounded px-2 py-1 w-28 font-semibold text-black"
+                                                                                placeholder="$0.00"
+                                                                            />
+                                                                        ) : (
+                                                                            <span className={record.billedAmount ? 'text-blue-700 font-bold' : 'text-gray-400 font-semibold'}>
+                                                                                {record.billedAmount || '—'}
+                                                                            </span>
+                                                                        )}
+                                                                    </td>
+                                                                    <td className="px-6 py-4 whitespace-nowrap">
+                                                                        {isEditing ? (
+                                                                            <input
+                                                                                type="text"
+                                                                                value={record.paidAmount || ''}
+                                                                                onChange={(e) => handleFieldUpdate(key, 'paidAmount', e.target.value)}
+                                                                                className="border-2 border-gray-300 rounded px-2 py-1 w-28 font-semibold text-black"
+                                                                                placeholder="$0.00"
+                                                                            />
+                                                                        ) : (
+                                                                            <span className={record.paidAmount ? 'text-green-700 font-bold' : 'text-gray-400 font-semibold'}>
+                                                                                {record.paidAmount || '—'}
+                                                                            </span>
+                                                                        )}
+                                                                    </td>
+                                                                    <td className="px-6 py-4 whitespace-nowrap">
+                                                                        {isEditing ? (
+                                                                            <input
+                                                                                type="text"
+                                                                                value={record.paidDate || ''}
+                                                                                onChange={(e) => handleFieldUpdate(key, 'paidDate', e.target.value)}
+                                                                                className="border-2 border-gray-300 rounded px-2 py-1 w-28 font-semibold text-black"
+                                                                                placeholder="MMDDYYYY"
+                                                                            />
+                                                                        ) : (
+                                                                            <span className={record.paidDate ? 'text-black font-semibold' : 'text-gray-400 font-semibold'}>
+                                                                                {displayDate(record.paidDate) || '—'}
+                                                                            </span>
+                                                                        )}
+                                                                    </td>
+                                                                    <td className="px-6 py-4 whitespace-nowrap">
+                                                                        {isEditing ? (
+                                                                            <div className="flex gap-2">
+                                                                                <button
+                                                                                    onClick={() => saveRecordToAPI(key)}
+                                                                                    className="text-green-600 hover:text-green-800 font-bold"
+                                                                                >
+                                                                                    <Save />
+                                                                                </button>
+                                                                                <button
+                                                                                    onClick={handleCancelEdit}
+                                                                                    className="text-red-600 hover:text-red-800 font-bold"
+                                                                                >
+                                                                                    <Cancel />
+                                                                                </button>
+                                                                            </div>
+                                                                        ) : (
+                                                                            <button
+                                                                                onClick={() => handleEditStart(key)}
+                                                                                className="text-blue-600 hover:text-blue-800 font-bold"
+                                                                            >
+                                                                                <Edit2 />
+                                                                            </button>
+                                                                        )}
+                                                                    </td>
+                                                                </tr>
+                                                            );
+                                                        })}
+                                                    </tbody>
+                                                </table>
+                                            </div>
                                         </div>
                                     )}
                                 </div>
